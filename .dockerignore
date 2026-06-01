@@ -1,0 +1,37 @@
+# Секреты — НИКОГДА в образ
+.env
+
+# Локальное окружение и кэш
+.venv/
+__pycache__/
+*.pyc
+
+# Локальные данные/логи/БД (бот создаст заново)
+user_data/data/
+user_data/logs/
+user_data/backtest_results/
+user_data/hyperopt_results/
+user_data/notebooks/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite.old
+*.sqlite-shm.old
+*.sqlite-wal.old
+
+# Логи разработки
+*.log
+bt_*.log
+bt_*.txt
+dl_*.log
+*.err.log
+*.out.log
+ui_install.log
+install_freqtrade.log
+ls.log
+
+# Скриншоты дашборда (не нужны в проде)
+dashboard/*.png
+
+# Git
+.git/

@@ -1,0 +1,36 @@
+# Secrets: never commit API keys.
+.env
+
+# Local Python environment.
+.venv/
+
+# Freqtrade generated data.
+user_data/logs/
+user_data/data/
+user_data/backtest_results/
+user_data/hyperopt_results/
+user_data/notebooks/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Misc.
+__pycache__/
+*.pyc
+*.log
+install_freqtrade.log
+
+# Archived DBs and dev artifacts
+*.sqlite.old
+*.sqlite-shm.old
+*.sqlite-wal.old
+bt_*.txt
+bt_*.log
+dl_*.log
+*.err.log
+*.out.log
+ls.log
+ui_install.log
+
+# Dashboard screenshots (not needed for deploy)
+dashboard/*.png

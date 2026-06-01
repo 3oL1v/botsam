@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Freqtrade Mini Monitor</title>
+    <link rel="stylesheet" href="/static/miniapp.css" />
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  </head>
+  <body>
+    <main class="phone-shell">
+      <header class="app-header">
+        <div>
+          <span class="muted">Freqtrade</span>
+          <h1>Mini Monitor</h1>
+        </div>
+        <div class="header-status">
+          <span class="status-dot" id="statusDot"></span>
+          <span id="runState">...</span>
+          <strong>DRY RUN</strong>
+        </div>
+      </header>
+
+      <section class="hero-card">
+        <div class="hero-top">
+          <div>
+            <span id="exchangeMode" class="muted">binance futures</span>
+            <strong id="strategyName">-</strong>
+          </div>
+          <button id="refreshBtn" type="button" aria-label="Refresh">↻</button>
+        </div>
+        <div class="profit-line">
+          <span id="profitValue">0.00 USDT</span>
+          <strong id="profitPercent">0.00%</strong>
+        </div>
+        <div class="hero-grid">
+          <div>
+            <span>Баланс</span>
+            <strong id="balanceValue">-</strong>
+          </div>
+          <div>
+            <span>Открыто</span>
+            <strong id="openCount">-</strong>
+          </div>
+          <div>
+            <span>Win rate</span>
+            <strong id="winRate">-</strong>
+          </div>
+        </div>
+      </section>
+
+      <nav class="tabs" aria-label="Sections">
+        <button class="tab active" type="button" data-tab="overview">Обзор</button>
+        <button class="tab" type="button" data-tab="open">Открытые</button>
+        <button class="tab" type="button" data-tab="history">История</button>
+      </nav>
+
+      <section class="view active" id="view-overview">
+        <article class="market-card">
+          <div class="section-head">
+            <div>
+              <span class="muted">Рынок</span>
+              <h2 id="marketPair">-</h2>
+            </div>
+            <div class="market-price">
+              <strong id="marketPrice">-</strong>
+              <span id="marketChange">-</span>
+            </div>
+          </div>
+          <canvas id="priceSpark" width="640" height="220"></canvas>
+        </article>
+
+        <section class="mini-metrics">
+          <article>
+            <span>RSI 14</span>
+            <strong id="rsiValue">-</strong>
+          </article>
+          <article>
+            <span>Fear & Greed</span>
+            <strong id="fearGreed">-</strong>
+          </article>
+          <article>
+            <span>Funding</span>
+            <strong id="fundingRate">-</strong>
+          </article>
+        </section>
+      </section>
+
+      <section class="view" id="view-open">
+        <div class="section-head compact">
+          <h2>Открытые сделки</h2>
+          <span id="openSubtitle" class="muted">-</span>
+        </div>
+        <div id="openTrades" class="trade-list"></div>
+      </section>
+
+      <section class="view" id="view-history">
+        <div class="section-head compact">
+          <h2>История</h2>
+          <span id="historySubtitle" class="muted">-</span>
+        </div>
+        <div id="recentTrades" class="trade-list"></div>
+      </section>
+
+      <footer class="app-footer">
+        <span id="updatedAt">-</span>
+        <span id="errorLine"></span>
+      </footer>
+    </main>
+
+    <script src="/static/miniapp.js"></script>
+  </body>
+</html>
