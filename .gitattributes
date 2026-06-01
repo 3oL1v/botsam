@@ -1,0 +1,4 @@
+# Shell-скрипты и Dockerfile ВСЕГДА с LF (иначе контейнер не стартует на Linux).
+*.sh text eol=lf
+Dockerfile text eol=lf
+start.sh text eol=lf

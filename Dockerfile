@@ -5,11 +5,12 @@
 # =============================================================================
 FROM freqtradeorg/freqtrade:stable
 
+# Запускаемся под root, чтобы свободно писать логи/БД в /freqtrade.
 USER root
 
-# Доп. зависимости для dashboard (fastapi/uvicorn уже есть во freqtrade-образе,
-# ставим недостающие на всякий случай).
-RUN pip install --no-cache-dir "fastapi>=0.110" "uvicorn>=0.29" "ccxt>=4.5" "requests>=2.31"
+# Зависимости dashboard (fastapi, uvicorn, ccxt, requests) уже входят в образ
+# freqtrade, поэтому отдельный pip install не нужен — это исключает риск
+# установки в неверный Python-venv.
 
 WORKDIR /freqtrade
 
