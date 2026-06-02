@@ -11,18 +11,17 @@
 виртуальные деньги, `dry_run: true` всегда). Развёрнут на **Railway** (Docker), мониторинг —
 **Telegram Mini App** (@z3lv_bot) + web dashboard. GitHub: https://github.com/3oL1v/botsam
 
-## 2. ТЕКУЩИЙ СТАТУС (на 2026-06-02)
+## 2. ТЕКУЩИЙ СТАТУС (на 2026-06-02, обновлено)
 - ✅ Код, Dockerfile, dashboard/miniapp, Telegram-уведомления — готовы и в репо.
 - ✅ Деплой на Railway собирается, контейнер стартует, dashboard/miniapp отвечает.
-- 🔴 **ГЛАВНЫЙ БЛОКЕР: биржа недоступна с IP Railway.**
-  - Binance → `451 restricted location`.
-  - Bybit → `403 CloudFront ... block access from your country`.
-  - Бот не может загрузить рынки → не торгует (баланс показывает, но сделок нет).
-- ⏳ **СЛЕДУЮЩИЙ ШАГ (выбран пользователем): сменить РЕГИОН Railway** на Singapore
-  (Southeast Asia), т.к. Bybit — азиатская биржа. Делает пользователь в панели Railway
-  (Settings → Regions), у агента доступа к Railway НЕТ. После — прислать логи.
-  - Если регион не поможет → fallback: прокси внутри контейнера (ccxt httpsProxy) или
-    другая биржа (OKX/Gate/MEXC/Kraken).
+- ✅ **БИРЖЕВОЙ БЛОКЕР РЕШЁН: смена региона Railway на Singapore сработала.**
+  Bybit с Singapore отдаёт данные (`leverage_tiers_USDT.json` загружается, `Wallets synced`).
+  Никаких 403/451. ВАЖНО: держать регион Railway = Southeast Asia (Singapore).
+- ⏳ **ПОСЛЕДНИЙ ШАГ: пользователь добавляет в Railway Variables**
+  `FREQTRADE__TELEGRAM__TOKEN` (от @BotFather, бот @z3lv_bot) и
+  `FREQTRADE__TELEGRAM__CHAT_ID` (от @userinfobot). Без них бот падает с
+  `InvalidToken` (т.к. telegram.enabled=true). После — Redeploy и `/start` боту.
+  - Если не хочет Telegram — поставить telegram.enabled=false в конфиге.
 
 ## 3. КЛЮЧЕВЫЕ ФАКТЫ / ГРАБЛИ (НЕ повторять ошибки)
 1. **Биржа сейчас = Bybit, futures.** (Файл стратегии назван binance-historically, это ок.)
