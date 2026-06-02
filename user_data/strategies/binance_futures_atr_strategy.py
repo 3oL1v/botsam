@@ -6,7 +6,7 @@ import talib.abstract as ta
 from pandas import DataFrame
 
 import freqtrade.vendor.qtpylib.indicators as qtpylib
-from freqtrade.persistence import Trade
+from freqtrade.persistence import Order, Trade
 from freqtrade.strategy import IStrategy, stoploss_from_absolute
 
 
@@ -99,6 +99,56 @@ class BinanceFuturesAtrStrategy(IStrategy):
         Если по паре доступно меньше 50 (напр. 25), берём максимум доступного.
         """
         return min(self.target_leverage, max_leverage)
+
+    # ---- Русские уведомления в Telegram при заполнении ордера ----
+    # Вызывается после ИСПОЛНЕНИЯ любого ордера (вход/выход/стоп).
+    # Свои сообщения шлём через self.dp.send_msg() — они приходят в Telegram,
+    # если в конфиге включены allow_custom_messages и notification_settings.strategy_msg.
+    def order_filled(
+        self, pair: str, trade: Trade, order: Order, current_time: datetime, **kwargs
+    ) -> None:
+        напр = "ШОРТ" if trade.is_short else "ЛОНГ"   # направление сделки
+        плечо = f"{trade.leverage:.0f}x" if trade.leverage else "1x"
+
+        if order.ft_order_side == "enter":
+            # ВХОД в сделку
+            цена = order.safe_filled and order.average or trade.open_rate
+            текст = (
+                f"🟢 ВХОД в сделку\n"
+                f"Пара: {pair}\n"
+                f"Направление: {напр}\n"
+                f"Цена входа: {trade.open_rate:.4f}\n"
+                f"Плечо: {плечо}\n"
+                f"Размер (маржа): {trade.stake_amount:.2f} USDT"
+            )
+        else:
+            # ВЫХОД из сделки (или частичный/стоп) — показываем результат
+            profit_abs = trade.close_profit_abs if trade.close_profit_abs is not None else (trade.realized_profit or 0.0)
+            profit_pct = (trade.close_profit or 0.0) * 100
+            знак = "✅ ПРИБЫЛЬ" if profit_abs >= 0 else "🔴 УБЫТОК"
+            причина = trade.exit_reason or "—"
+            # перевод частых причин выхода на русский
+            причины = {
+                "atr_take_profit": "тейк-профит (ATR)",
+                "stop_loss": "стоп-лосс",
+                "stoploss_on_exchange": "стоп-лосс (на бирже)",
+                "trailing_stop_loss": "трейлинг-стоп",
+                "exit_signal": "сигнал выхода (RSI)",
+                "liquidation": "ЛИКВИДАЦИЯ",
+                "roi": "достигнут ROI",
+                "force_exit": "ручной выход",
+            }
+            причина_ру = причины.get(причина, причина)
+            текст = (
+                f"{знак} — выход из сделки\n"
+                f"Пара: {pair}\n"
+                f"Направление: {напр}\n"
+                f"Причина: {причина_ру}\n"
+                f"Результат: {profit_abs:+.2f} USDT ({profit_pct:+.2f}%)"
+            )
+
+        # always_send=True — чтобы сообщение пришло гарантированно, а не раз в свечу
+        self.dp.send_msg(текст, always_send=True)
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe["ema_fast"] = ta.EMA(dataframe, timeperiod=self.ema_fast)

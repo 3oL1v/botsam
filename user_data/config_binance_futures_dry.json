@@ -45,7 +45,7 @@
     "stoploss_on_exchange_interval": 60
   },
   "exchange": {
-    "name": "bybit",
+    "name": "binance",
     "key": "",
     "secret": "",
     "ccxt_config": {
@@ -83,28 +83,30 @@
     "enabled": true,
     "token": "",
     "chat_id": "",
+    "allow_custom_messages": true,
     "notification_settings": {
       "status": "silent",
       "warning": "on",
       "startup": "on",
-      "entry": "on",
-      "entry_fill": "on",
-      "entry_cancel": "silent",
+      "entry": "off",
+      "entry_fill": "off",
+      "entry_cancel": "off",
       "exit": {
-        "roi": "on",
-        "emergency_exit": "on",
-        "force_exit": "on",
-        "exit_signal": "on",
-        "trailing_stop_loss": "on",
-        "stop_loss": "on",
-        "stoploss_on_exchange": "on",
-        "custom_exit": "on",
-        "liquidation": "on",
-        "partial_exit": "on",
-        "*": "on"
+        "roi": "off",
+        "emergency_exit": "off",
+        "force_exit": "off",
+        "exit_signal": "off",
+        "trailing_stop_loss": "off",
+        "stop_loss": "off",
+        "stoploss_on_exchange": "off",
+        "custom_exit": "off",
+        "liquidation": "off",
+        "partial_exit": "off",
+        "*": "off"
       },
-      "exit_cancel": "silent",
-      "exit_fill": "on",
+      "exit_cancel": "off",
+      "exit_fill": "off",
+      "strategy_msg": "on",
       "protection_trigger": "on",
       "protection_trigger_global": "on"
     }

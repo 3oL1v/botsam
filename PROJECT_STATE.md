@@ -11,6 +11,12 @@
 виртуальные деньги, `dry_run: true` всегда). Развёрнут на **Railway** (Docker), мониторинг —
 **Telegram Mini App** (@z3lv_bot) + web dashboard. GitHub: https://github.com/3oL1v/botsam
 
+**Биржа: BINANCE futures** (вернулись с Bybit, т.к. регион Singapore решил блок; Binance крупнее).
+**Telegram-уведомления: на РУССКОМ** — слются из стратегии через `self.dp.send_msg()` в колбэке
+`order_filled` (вход/выход + результат). Встроенные англ. уведомления Freqtrade ОТКЛЮЧЕНЫ
+(entry/exit/*=off), чтобы не было дублей; включены `allow_custom_messages` + `strategy_msg=on`.
+> У Freqtrade НЕТ встроенной локализации — русский только через send_msg в order_filled.
+
 ## 2. ТЕКУЩИЙ СТАТУС (на 2026-06-02, обновлено)
 - ✅ Код, Dockerfile, dashboard/miniapp, Telegram-уведомления — готовы и в репо.
 - ✅ Деплой на Railway собирается, контейнер стартует, dashboard/miniapp отвечает.
@@ -24,7 +30,8 @@
   - Если не хочет Telegram — поставить telegram.enabled=false в конфиге.
 
 ## 3. КЛЮЧЕВЫЕ ФАКТЫ / ГРАБЛИ (НЕ повторять ошибки)
-1. **Биржа сейчас = Bybit, futures.** (Файл стратегии назван binance-historically, это ок.)
+1. **Биржа сейчас = Binance, futures.** Работает на Railway ТОЛЬКО из региона Singapore.
+   НЕ менять регион Railway с Singapore — иначе вернётся 451/403.
 2. **451/403 происходят на стороне Railway, НЕ на компе.** VPN пользователя на это НЕ влияет —
    бот ходит к бирже с IP Railway. Лечится сменой региона/прокси/биржи, а НЕ VPN.
 3. **Локально (домашний IP пользователя) биржи тоже заблокированы** → `download-data`,
