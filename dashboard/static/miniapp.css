@@ -498,3 +498,105 @@ h2 {
     font-size: 12px;
   }
 }
+
+/* ---- Вкладка "Управление" (тестовые сделки) ---- */
+.control-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 16px;
+  margin-bottom: 18px;
+  box-shadow: var(--shadow);
+}
+
+.control-label {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.control-select {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  font-size: 15px;
+  margin-bottom: 14px;
+  appearance: none;
+}
+
+.control-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.btn-trade {
+  padding: 14px;
+  border-radius: 12px;
+  border: none;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  color: #0b0d0c;
+  transition: transform 0.05s ease, opacity 0.2s ease;
+}
+
+.btn-trade:active {
+  transform: scale(0.97);
+}
+
+.btn-trade:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.btn-trade.long {
+  background: var(--green);
+}
+
+.btn-trade.short {
+  background: var(--red);
+}
+
+.control-hint {
+  font-size: 11px;
+  color: var(--faint);
+  margin: 12px 0 0;
+  text-align: center;
+}
+
+.control-msg {
+  margin-top: 12px;
+  font-size: 13px;
+  text-align: center;
+  min-height: 18px;
+}
+
+.control-msg.ok {
+  color: var(--green);
+}
+
+.control-msg.err {
+  color: var(--red);
+}
+
+.btn-close {
+  margin-top: 10px;
+  width: 100%;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--red);
+  background: transparent;
+  color: var(--red);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-close:active {
+  background: rgba(255, 107, 98, 0.12);
+}

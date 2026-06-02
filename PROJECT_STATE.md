@@ -46,6 +46,17 @@
 - Telegram: встроенные уведомления (entry/exit/...) ВЫКЛЮЧЕНЫ, шлём только свои русские через
   send_msg. Для этого в конфиге allow_custom_messages=true и notification_settings.strategy_msg=on.
 
+## 2c. УПРАВЛЕНИЕ ЧЕРЕЗ MINI APP (вместо нестабильных Telegram-кнопок)
+- Telegram inline-кнопки (Which pair/trade) протухают при рестартах — отказались от них.
+  Нижняя клавиатура Telegram не годится: forcelong/forceexit туда нельзя (нет в allowed list).
+- РЕШЕНИЕ: вкладка "Управление" в Mini App. Файлы: dashboard/static/miniapp.{html,js,css}.
+  Backend dashboard/server.py проксирует в Freqtrade REST:
+    POST /api/control/forceenter {pair, side}  -> freqtrade POST /forceenter (ordertype=market)
+    POST /api/control/forceexit  {tradeid}      -> freqtrade POST /forceexit  (ordertype=market)
+  Оба защищены тем же MINIAPP_ACCESS_TOKEN (заголовок X-Miniapp-Token).
+- Вход через Mini App = МARKET ордер (исполняется сразу, без задержки лимитника).
+- Кнопки: Лонг/Шорт + выбор пары; список открытых сделок с кнопкой "Закрыть #id".
+
 ## 3. КЛЮЧЕВЫЕ ФАКТЫ / ГРАБЛИ (НЕ повторять ошибки)
 1. **Биржа сейчас = Binance, futures.** Работает на Railway ТОЛЬКО из региона Singapore.
    НЕ менять регион Railway с Singapore — иначе вернётся 451/403.

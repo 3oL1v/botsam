@@ -48,6 +48,24 @@ async function getJson(url) {
   return response.json();
 }
 
+async function postJson(url, payload) {
+  const headers = { "Content-Type": "application/json" };
+  if (state.token) headers["X-Miniapp-Token"] = state.token;
+  const response = await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+    cache: "no-store",
+  });
+  let data = {};
+  try { data = await response.json(); } catch (_) { /* пусто */ }
+  if (!response.ok) {
+    const detail = data.detail ? (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail)) : `${response.status}`;
+    throw new Error(detail);
+  }
+  return data;
+}
+
 function fitCanvas(canvas) {
   const ratio = window.devicePixelRatio || 1;
   const rect = canvas.getBoundingClientRect();
@@ -168,6 +186,79 @@ function renderTrades() {
   $("recentTrades").innerHTML = recent.length
     ? recent.map(tradeCard).join("")
     : emptyCard("История пустая", "Закрытые dry-run сделки появятся здесь.");
+
+  // Вкладка "Управление": список открытых сделок с кнопкой закрытия
+  $("controlOpenSub").textContent = `${open.length} открыто`;
+  $("controlOpenTrades").innerHTML = open.length
+    ? open.map(controlTradeCard).join("")
+    : emptyCard("Нет открытых сделок", "Открой тестовую сделку кнопкой выше.");
+  document.querySelectorAll(".btn-close").forEach((btn) => {
+    btn.addEventListener("click", () => closeTrade(btn.dataset.id));
+  });
+}
+
+// Карточка открытой сделки с кнопкой "Закрыть"
+function controlTradeCard(trade) {
+  const profit = Number(trade.profit_percent || 0);
+  const sideClass = trade.is_short ? "short" : "long";
+  return `
+    <article class="trade-card">
+      <div class="trade-main">
+        <div class="trade-pair">
+          <strong>#${trade.id ?? "?"} ${trade.pair || "-"}</strong>
+          <span class="side ${sideClass}">${trade.side || "-"}</span>
+        </div>
+        <div class="trade-profit">
+          <strong class="${profit < 0 ? "down" : "up"}">${formatPercent(profit)}</strong>
+          <span>${formatMoney(trade.profit_abs, "USDT")}</span>
+        </div>
+      </div>
+      <button class="btn-close" type="button" data-id="${trade.id}">✕ Закрыть #${trade.id}</button>
+    </article>
+  `;
+}
+
+function setControlMsg(text, kind) {
+  const el = $("controlMsg");
+  el.textContent = text || "";
+  el.className = "control-msg" + (kind ? " " + kind : "");
+}
+
+function fillPairSelect() {
+  const select = $("pairSelect");
+  const pairs = state.data?.pairs || [];
+  if (!pairs.length || select.dataset.filled === String(pairs.length)) return;
+  select.innerHTML = pairs.map((p) => `<option value="${p}">${p}</option>`).join("");
+  select.dataset.filled = String(pairs.length);
+}
+
+async function openTrade(side) {
+  const pair = $("pairSelect").value;
+  if (!pair) { setControlMsg("Сначала выбери пару", "err"); return; }
+  setControlMsg(`Открываю ${side === "short" ? "шорт" : "лонг"} ${pair}...`, "");
+  $("btnLong").disabled = true;
+  $("btnShort").disabled = true;
+  try {
+    await postJson("/api/control/forceenter", { pair, side });
+    setControlMsg(`✓ Заявка отправлена: ${side === "short" ? "ШОРТ" : "ЛОНГ"} ${pair}`, "ok");
+    setTimeout(refresh, 1500);
+  } catch (error) {
+    setControlMsg("Ошибка: " + error.message, "err");
+  } finally {
+    $("btnLong").disabled = false;
+    $("btnShort").disabled = false;
+  }
+}
+
+async function closeTrade(tradeid) {
+  setControlMsg(`Закрываю сделку #${tradeid}...`, "");
+  try {
+    await postJson("/api/control/forceexit", { tradeid });
+    setControlMsg(`✓ Сделка #${tradeid} закрывается`, "ok");
+    setTimeout(refresh, 1500);
+  } catch (error) {
+    setControlMsg("Ошибка: " + error.message, "err");
+  }
 }
 
 function render(data) {
@@ -203,6 +294,7 @@ function render(data) {
 
   drawSpark(market.chart || []);
   renderTrades();
+  fillPairSelect();
 
   $("updatedAt").textContent = new Date(data.updated_at || Date.now()).toLocaleTimeString();
   $("errorLine").textContent = (data.errors || []).slice(0, 1).join("");
@@ -231,6 +323,8 @@ document.querySelectorAll(".tab").forEach((button) => {
 });
 
 $("refreshBtn").addEventListener("click", refresh);
+$("btnLong").addEventListener("click", () => openTrade("long"));
+$("btnShort").addEventListener("click", () => openTrade("short"));
 window.addEventListener("resize", () => state.data && drawSpark(state.data.market?.chart || []));
 
 refresh();

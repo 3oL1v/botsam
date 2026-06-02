@@ -298,6 +298,26 @@ def freqtrade_api_get(path: str, params: dict[str, Any] | None = None) -> Any:
     return response.json()
 
 
+def freqtrade_api_post(path: str, payload: dict[str, Any]) -> Any:
+    """POST в Freqtrade REST API (для forceenter/forceexit)."""
+    base_url, _, _ = _freqtrade_api_base()
+    token = _freqtrade_token()
+    response = requests.post(
+        f"{base_url}/api/v1/{path}",
+        headers={"Authorization": f"Bearer {token}"},
+        json=payload,
+        timeout=15,
+    )
+    # пробрасываем тело ошибки, чтобы показать причину в Mini App
+    if response.status_code >= 400:
+        try:
+            detail = response.json()
+        except Exception:
+            detail = {"error": response.text[:200]}
+        raise HTTPException(status_code=response.status_code, detail=detail)
+    return response.json()
+
+
 def _profit_percent(trade: dict[str, Any]) -> float | None:
     for key in ("profit_pct", "close_profit_pct", "profit_percent", "close_profit_percent"):
         value = safe_float(trade.get(key))
@@ -566,3 +586,37 @@ def api_miniapp(request: Request, pair: str | None = Query(default=None)):
             "summary": fetch_bot_state(),
             "updated_at": int(_now() * 1000),
         }
+
+
+# ---------------------------------------------------------------------------
+#  УПРАВЛЕНИЕ из Mini App: открыть/закрыть сделку (только dry-run).
+#  Проксируем в Freqtrade REST API. Защищено тем же miniapp-токеном.
+# ---------------------------------------------------------------------------
+@app.post("/api/control/forceenter")
+async def api_force_enter(request: Request):
+    require_miniapp_access(request)
+    body = await request.json()
+    pair = body.get("pair")
+    side = body.get("side", "long")
+    if pair not in configured_pairs():
+        raise HTTPException(status_code=400, detail="Пара не в whitelist")
+    if side not in ("long", "short"):
+        raise HTTPException(status_code=400, detail="side должен быть long или short")
+    # market — чтобы вход исполнялся сразу (удобно для теста)
+    payload = {"pair": pair, "side": side, "ordertype": "market"}
+    result = freqtrade_api_post("forceenter", payload)
+    _cache.pop("bot_state", None)  # сбросить кэш статуса, чтобы UI сразу обновился
+    return {"ok": True, "result": result}
+
+
+@app.post("/api/control/forceexit")
+async def api_force_exit(request: Request):
+    require_miniapp_access(request)
+    body = await request.json()
+    tradeid = body.get("tradeid")
+    if tradeid in (None, ""):
+        raise HTTPException(status_code=400, detail="Нужен tradeid (или 'all')")
+    payload = {"tradeid": str(tradeid), "ordertype": "market"}
+    result = freqtrade_api_post("forceexit", payload)
+    _cache.pop("bot_state", None)
+    return {"ok": True, "result": result}

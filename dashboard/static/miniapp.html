@@ -53,6 +53,7 @@
         <button class="tab active" type="button" data-tab="overview">Обзор</button>
         <button class="tab" type="button" data-tab="open">Открытые</button>
         <button class="tab" type="button" data-tab="history">История</button>
+        <button class="tab" type="button" data-tab="control">Управление</button>
       </nav>
 
       <section class="view active" id="view-overview">
@@ -100,6 +101,31 @@
           <span id="historySubtitle" class="muted">-</span>
         </div>
         <div id="recentTrades" class="trade-list"></div>
+      </section>
+
+      <section class="view" id="view-control">
+        <div class="section-head compact">
+          <h2>Тестовая сделка</h2>
+          <span class="muted">только dry-run</span>
+        </div>
+
+        <article class="control-card">
+          <label class="control-label" for="pairSelect">Пара</label>
+          <select id="pairSelect" class="control-select"></select>
+
+          <div class="control-buttons">
+            <button id="btnLong" type="button" class="btn-trade long">▲ Лонг</button>
+            <button id="btnShort" type="button" class="btn-trade short">▼ Шорт</button>
+          </div>
+          <p class="control-hint">Вход по рынку, плечо 50x, нотионал 100 USDT.</p>
+          <div id="controlMsg" class="control-msg"></div>
+        </article>
+
+        <div class="section-head compact">
+          <h2>Закрыть сделку</h2>
+          <span id="controlOpenSub" class="muted">-</span>
+        </div>
+        <div id="controlOpenTrades" class="trade-list"></div>
       </section>
 
       <footer class="app-footer">
