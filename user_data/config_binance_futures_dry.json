@@ -11,6 +11,7 @@
   "dry_run_wallet": 100,
   "db_url": "sqlite:///tradesv3.binance_futures_dryrun.sqlite",
   "cancel_open_orders_on_exit": false,
+  "force_entry_enable": true,
   "trading_mode": "futures",
   "margin_mode": "isolated",
   "timeframe": "1h",
