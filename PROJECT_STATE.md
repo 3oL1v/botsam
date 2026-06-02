@@ -53,7 +53,12 @@
   Backend dashboard/server.py проксирует в Freqtrade REST:
     POST /api/control/forceenter {pair, side}  -> freqtrade POST /forceenter (ordertype=market)
     POST /api/control/forceexit  {tradeid}      -> freqtrade POST /forceexit  (ordertype=market)
-  Оба защищены тем же MINIAPP_ACCESS_TOKEN (заголовок X-Miniapp-Token).
+  Оба защищены MINIAPP_ACCESS_TOKEN (заголовок X-Miniapp-Token или ?access=).
+  ВАЖНО: управление использует require_control_access — если MINIAPP_ACCESS_TOKEN на
+  сервере НЕ задан, управление ЗАПРЕЩЕНО (403). Просмотр (require_miniapp_access) при
+  пустом токене открыт. Поэтому MINIAPP_ACCESS_TOKEN ОБЯЗАТЕЛЬНО задать в Railway Variables,
+  иначе кнопки Лонг/Шорт/Закрыть вернут 403. (Баг был: токен не задан -> управление открыто всем.)
+  Побочно: чтение body ДО проверки токена убирает ложный 502 на прокси Railway.
 - Вход через Mini App = МARKET ордер (исполняется сразу, без задержки лимитника).
 - Кнопки: Лонг/Шорт + выбор пары; список открытых сделок с кнопкой "Закрыть #id".
 

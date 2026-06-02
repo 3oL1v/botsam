@@ -475,11 +475,29 @@ def fetch_miniapp(pair: str | None = None) -> dict[str, Any]:
 
 
 def require_miniapp_access(request: Request) -> None:
+    # Просмотр: если токен на сервере НЕ задан — доступ открыт (read-only данные).
     if not MINIAPP_ACCESS_TOKEN:
         return
     supplied = request.headers.get("x-miniapp-token") or request.query_params.get("access")
     if supplied != MINIAPP_ACCESS_TOKEN:
         raise HTTPException(status_code=401, detail="Miniapp access token required")
+
+
+def require_control_access(request: Request) -> None:
+    """
+    Управление (открыть/закрыть сделку) — строже просмотра:
+    - если MINIAPP_ACCESS_TOKEN на сервере НЕ задан, управление ЗАПРЕЩЕНО полностью
+      (защита по умолчанию: лучше не дать управлять, чем открыть всем);
+    - если задан — требуем точное совпадение токена.
+    """
+    if not MINIAPP_ACCESS_TOKEN:
+        raise HTTPException(
+            status_code=403,
+            detail="Управление отключено: на сервере не задан MINIAPP_ACCESS_TOKEN",
+        )
+    supplied = request.headers.get("x-miniapp-token") or request.query_params.get("access")
+    if supplied != MINIAPP_ACCESS_TOKEN:
+        raise HTTPException(status_code=401, detail="Нужен корректный токен доступа")
 
 
 def fetch_market(pair: str) -> dict[str, Any]:
@@ -600,7 +618,7 @@ async def api_force_enter(request: Request):
         body = await request.json()
     except Exception:
         body = {}
-    require_miniapp_access(request)
+    require_control_access(request)
     pair = body.get("pair")
     side = body.get("side", "long")
     if pair not in configured_pairs():
@@ -620,7 +638,7 @@ async def api_force_exit(request: Request):
         body = await request.json()
     except Exception:
         body = {}
-    require_miniapp_access(request)
+    require_control_access(request)
     tradeid = body.get("tradeid")
     if tradeid in (None, ""):
         raise HTTPException(status_code=400, detail="Нужен tradeid (или 'all')")
