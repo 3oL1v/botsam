@@ -594,8 +594,13 @@ def api_miniapp(request: Request, pair: str | None = Query(default=None)):
 # ---------------------------------------------------------------------------
 @app.post("/api/control/forceenter")
 async def api_force_enter(request: Request):
+    # Сначала ЧИТАЕМ тело (иначе ответ до чтения body -> обрыв -> 502 на прокси),
+    # затем проверяем токен -> чистый 401 при отсутствии доступа.
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
     require_miniapp_access(request)
-    body = await request.json()
     pair = body.get("pair")
     side = body.get("side", "long")
     if pair not in configured_pairs():
@@ -611,8 +616,11 @@ async def api_force_enter(request: Request):
 
 @app.post("/api/control/forceexit")
 async def api_force_exit(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
     require_miniapp_access(request)
-    body = await request.json()
     tradeid = body.get("tradeid")
     if tradeid in (None, ""):
         raise HTTPException(status_code=400, detail="Нужен tradeid (или 'all')")
