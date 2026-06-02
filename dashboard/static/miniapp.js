@@ -80,7 +80,8 @@ function drawSpark(rows) {
   const canvas = $("priceSpark");
   const { context, width, height } = fitCanvas(canvas);
   context.clearRect(0, 0, width, height);
-  context.fillStyle = "#101210";
+  // Светлый фон под график (под общий ЧБ-стиль)
+  context.fillStyle = "rgba(255,255,255,0.4)";
   context.fillRect(0, 0, width, height);
 
   if (!rows || rows.length < 2) return;
@@ -92,7 +93,8 @@ function drawSpark(rows) {
   const range = max - min || 1;
   const pad = 16;
 
-  context.strokeStyle = "#252b25";
+  // Тонкая сетка
+  context.strokeStyle = "rgba(0,0,0,0.06)";
   context.lineWidth = 1;
   for (let i = 1; i <= 3; i += 1) {
     const y = pad + ((height - pad * 2) * i) / 4;
@@ -102,27 +104,27 @@ function drawSpark(rows) {
     context.stroke();
   }
 
-  context.beginPath();
-  closes.forEach((close, index) => {
+  const points = closes.map((close, index) => {
     const x = pad + (index / (closes.length - 1)) * (width - pad * 2);
     const y = height - pad - ((close - min) / range) * (height - pad * 2);
-    if (index === 0) context.moveTo(x, y);
-    else context.lineTo(x, y);
+    return [x, y];
   });
 
-  const line = context.createLinearGradient(0, 0, width, 0);
-  line.addColorStop(0, "#43d17e");
-  line.addColorStop(1, "#8ab3ff");
-  context.strokeStyle = line;
+  // Линия — насыщенно-тёмная (монохром)
+  context.beginPath();
+  points.forEach(([x, y], i) => (i === 0 ? context.moveTo(x, y) : context.lineTo(x, y)));
+  context.strokeStyle = "#0a0a0b";
   context.lineWidth = 2;
+  context.lineJoin = "round";
   context.stroke();
 
+  // Заливка под линией — лёгкий серый градиент
   context.lineTo(width - pad, height - pad);
   context.lineTo(pad, height - pad);
   context.closePath();
   const fill = context.createLinearGradient(0, pad, 0, height - pad);
-  fill.addColorStop(0, "rgba(67,209,126,.2)");
-  fill.addColorStop(1, "rgba(67,209,126,0)");
+  fill.addColorStop(0, "rgba(10,10,11,0.12)");
+  fill.addColorStop(1, "rgba(10,10,11,0)");
   context.fillStyle = fill;
   context.fill();
 }
