@@ -29,6 +29,16 @@
   `InvalidToken` (т.к. telegram.enabled=true). После — Redeploy и `/start` боту.
   - Если не хочет Telegram — поставить telegram.enabled=false в конфиге.
 
+## 2b. ТЕСТ РАБОТОСПОСОБНОСТИ БОТА
+- Сигнал входа РЕДКИЙ (RSI cross 35 в аптренде) — 0 сделок за часы это НОРМА, не баг.
+- `force_entry_enable: true` включён → в Telegram доступны `/forcelong`, `/forceshort`.
+- Проверка: `/forcelong BTC/USDT:USDT` открывает сделку сразу. `/status` /`/count` — бот жив.
+- **Inline-кнопки Telegram (Which pair/Which trade) часто не нажимаются** (устаревают при
+  рестарте контейнера). Решение: вводить команду с аргументом — `/forcelong BTC/USDT:USDT`,
+  `/forceexit <id>` (id виден в /status, напр. 1).
+- БАГ ИСПРАВЛЕН: order_filled использовал `order.ft_order_side=="enter"` (никогда не истинно)
+  → ложное "выход из сделки" на входе. Заменено на `order.ft_is_entry`.
+
 ## 3. КЛЮЧЕВЫЕ ФАКТЫ / ГРАБЛИ (НЕ повторять ошибки)
 1. **Биржа сейчас = Binance, futures.** Работает на Railway ТОЛЬКО из региона Singapore.
    НЕ менять регион Railway с Singapore — иначе вернётся 451/403.
