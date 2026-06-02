@@ -64,7 +64,24 @@
 | Переменная | Зачем |
 |---|---|
 | `MINIAPP_ACCESS_TOKEN` | токен доступа к Mini App. URL: `.../miniapp?access=ЭТОТ_ТОКЕН` |
+| `FREQTRADE__TELEGRAM__TOKEN` | токен Telegram-бота от @BotFather (для уведомлений о сделках) |
+| `FREQTRADE__TELEGRAM__CHAT_ID` | твой chat_id (узнать у @userinfobot) |
 | `PORT` | задаётся Railway автоматически, трогать не нужно |
+
+> ⚠️ Telegram-уведомления включены в конфиге (`telegram.enabled: true`). **Если НЕ задать
+> `FREQTRADE__TELEGRAM__TOKEN` и `FREQTRADE__TELEGRAM__CHAT_ID` в Railway Variables — бот упадёт при старте.**
+> Это могут быть тот же бот @z3lv_bot и твой личный chat_id.
+
+### Telegram-уведомления о сделках
+Бот шлёт в чат: вход в сделку (`entry`/`entry_fill`), выход по любой причине
+(стоп-лосс, тейк, ликвидация, сигнал) и результат сделки (`exit_fill` с profit).
+Настройка — секция `telegram.notification_settings` в конфиге.
+
+Как получить значения:
+1. **Токен:** Telegram → @BotFather → `/newbot` (или взять токен существующего @z3lv_bot через `/mybots` → API Token).
+2. **chat_id:** напиши @userinfobot — он пришлёт твой `Id`.
+3. Внеси оба значения в Railway → Variables (см. таблицу выше) → Redeploy.
+4. Напиши боту `/start` в личке, чтобы он мог тебе писать.
 
 > Внутренние креды freqUI (jwt/password) в конфиге — заглушки `LOCAL_INTERNAL_ONLY_*`, т.к. порт 8081 не публичный. При желании можно переопределить через env `FREQTRADE__API_SERVER__*`.
 
