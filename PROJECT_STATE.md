@@ -36,8 +36,15 @@
 - **Inline-кнопки Telegram (Which pair/Which trade) часто не нажимаются** (устаревают при
   рестарте контейнера). Решение: вводить команду с аргументом — `/forcelong BTC/USDT:USDT`,
   `/forceexit <id>` (id виден в /status, напр. 1).
-- БАГ ИСПРАВЛЕН: order_filled использовал `order.ft_order_side=="enter"` (никогда не истинно)
-  → ложное "выход из сделки" на входе. Заменено на `order.ft_is_entry`.
+- БАГ (история фиксов order_filled — определение вход/выход):
+  1) было `order.ft_order_side=="enter"` — НИКОГДА не истинно (поле = buy/sell) → ложный "выход".
+  2) пробовал `order.ft_is_entry` — у Order НЕТ такого атрибута → AttributeError/краш.
+  3) ПРАВИЛЬНО (из доков): `if order.ft_order_side == trade.entry_side:` = вход, иначе выход.
+- ВАЖНО про /forcelong: ордер ЛИМИТНЫЙ, в dry-run исполняется не мгновенно (~20-40 сек).
+  Если сразу сделать /forceexit — отменишь ордер ДО исполнения ("forcesold, fully cancelled").
+  Надо подождать заполнения (в логах "LIMIT_BUY has been fulfilled"), потом /forceexit <id>.
+- Telegram: встроенные уведомления (entry/exit/...) ВЫКЛЮЧЕНЫ, шлём только свои русские через
+  send_msg. Для этого в конфиге allow_custom_messages=true и notification_settings.strategy_msg=on.
 
 ## 3. КЛЮЧЕВЫЕ ФАКТЫ / ГРАБЛИ (НЕ повторять ошибки)
 1. **Биржа сейчас = Binance, futures.** Работает на Railway ТОЛЬКО из региона Singapore.

@@ -110,7 +110,7 @@ class BinanceFuturesAtrStrategy(IStrategy):
         напр = "ШОРТ" if trade.is_short else "ЛОНГ"   # направление сделки
         плечо = f"{trade.leverage:.0f}x" if trade.leverage else "1x"
 
-        if order.ft_is_entry:
+        if order.ft_order_side == trade.entry_side:
             # ВХОД в сделку
             цена = order.safe_filled and order.average or trade.open_rate
             текст = (
