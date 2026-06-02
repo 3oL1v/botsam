@@ -45,7 +45,7 @@
     "stoploss_on_exchange_interval": 60
   },
   "exchange": {
-    "name": "binance",
+    "name": "bybit",
     "key": "",
     "secret": "",
     "ccxt_config": {
