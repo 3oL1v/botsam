@@ -62,6 +62,20 @@
 - Вход через Mini App = МARKET ордер (исполняется сразу, без задержки лимитника).
 - Кнопки: Лонг/Шорт + выбор пары; список открытых сделок с кнопкой "Закрыть #id".
 
+## 2d. СТРАТЕГИИ CrossSqueeze (squeeze-breakout, добавлены пользователем)
+- Файл: user_data/strategies/CrossSqueezeStrategies.py. 3 класса (15m, cross, long+short):
+  CrossSqueezeExpansion15m (2x, основная), CrossSqueezeExpansion4HFilter15m (2x + фильтр EMA 4h),
+  CrossSqueezeSafe15m (1.5x). Используют technical.qtpylib и @informative("4h").
+- Конфиг для бэктеста: user_data/config_backtest_cross.json (margin=cross, tf=15m,
+  pairs BTC/ETH/SOL, liquidation_buffer 0.10). Данные 15m+4h есть в user_data/data/binance.
+- Загрузка данных Binance ЛОКАЛЬНО работает, когда у пользователя включён VPN (на Railway — нет).
+- БЭКТЕСТ 2024-06..2026-06 (15m, BTC/ETH/SOL) — ВСЕ УБЫТОЧНЫ:
+  * Expansion15m: 563 сделки, -15.6%, PF 0.65, DD 16%
+  * Expansion4HFilter15m: 246 сделок, -7.96%, PF 0.61, DD 8.4% (самая щадящая)
+  * Safe15m: 565 сделок, -11.4%, PF 0.65, DD 12%
+  Вывод: безопаснее старой ATR-50x (нет ликвидаций, DD в разы меньше), но edge нет.
+- ДЕПЛОЙ НЕ ТРОГАЛИ: на Railway по-прежнему BinanceFuturesAtrStrategy (1h, isolated, 50x).
+
 ## 3. КЛЮЧЕВЫЕ ФАКТЫ / ГРАБЛИ (НЕ повторять ошибки)
 1. **Биржа сейчас = Binance, futures.** Работает на Railway ТОЛЬКО из региона Singapore.
    НЕ менять регион Railway с Singapore — иначе вернётся 451/403.
