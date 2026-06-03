@@ -10,7 +10,7 @@
 # =============================================================================
 
 CONFIG="user_data/config_binance_futures_dry.json"
-STRATEGY="BinanceFuturesAtrStrategy"
+STRATEGY="CrossSqueezeExpansion4HFilter15m"
 PORT="${PORT:-8091}"
 
 mkdir -p user_data/logs

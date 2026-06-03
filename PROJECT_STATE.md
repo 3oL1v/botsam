@@ -74,7 +74,12 @@
   * Expansion4HFilter15m: 246 сделок, -7.96%, PF 0.61, DD 8.4% (самая щадящая)
   * Safe15m: 565 сделок, -11.4%, PF 0.65, DD 12%
   Вывод: безопаснее старой ATR-50x (нет ликвидаций, DD в разы меньше), но edge нет.
-- ДЕПЛОЙ НЕ ТРОГАЛИ: на Railway по-прежнему BinanceFuturesAtrStrategy (1h, isolated, 50x).
+- ДЕПЛОЙ ПЕРЕКЛЮЧЁН (по выбору пользователя) на CrossSqueezeExpansion4HFilter15m:
+  config_binance_futures_dry.json -> margin=cross, tf=15m, buffer=0.10, пары BTC/ETH/SOL;
+  start.sh STRATEGY=CrossSqueezeExpansion4HFilter15m. dry_run=true, wallet 100, плечо 2x.
+  (Старая BinanceFuturesAtrStrategy и config.json остаются в репо как архив.)
+  Если при старте ругань на старую dry-run БД (другой tf/стратегия) — сбросить БД:
+  удалить tradesv3.binance_futures_dryrun.sqlite* (Railway создаст чистую со 100 USDT).
 
 ## 3. КЛЮЧЕВЫЕ ФАКТЫ / ГРАБЛИ (НЕ повторять ошибки)
 1. **Биржа сейчас = Binance, futures.** Работает на Railway ТОЛЬКО из региона Singapore.

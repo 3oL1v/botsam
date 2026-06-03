@@ -13,9 +13,9 @@
   "cancel_open_orders_on_exit": false,
   "force_entry_enable": true,
   "trading_mode": "futures",
-  "margin_mode": "isolated",
-  "timeframe": "1h",
-  "liquidation_buffer": 0.05,
+  "margin_mode": "cross",
+  "timeframe": "15m",
+  "liquidation_buffer": 0.1,
   "unfilledtimeout": {
     "entry": 10,
     "exit": 10,
@@ -64,14 +64,7 @@
     "pair_whitelist": [
       "BTC/USDT:USDT",
       "ETH/USDT:USDT",
-      "SOL/USDT:USDT",
-      "BNB/USDT:USDT",
-      "XRP/USDT:USDT",
-      "TON/USDT:USDT",
-      "DOGE/USDT:USDT",
-      "LINK/USDT:USDT",
-      "ADA/USDT:USDT",
-      "AVAX/USDT:USDT"
+      "SOL/USDT:USDT"
     ],
     "pair_blacklist": []
   },
