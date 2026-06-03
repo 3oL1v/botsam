@@ -6,6 +6,15 @@
 
 ---
 
+## 0. ПОСЛЕДНЕЕ СОСТОЯНИЕ (2026-06-03, подтверждено логами Railway)
+- НА ПРОДЕ РАБОТАЕТ: CrossSqueezeExpansion4HFilter15m, Binance futures, cross, 15m,
+  пары BTC/ETH/SOL, плечо 2x, dry_run, wallet ~100 USDT, state=RUNNING (стабильно 13h+).
+- Стратегия САМА открывает сигнальные сделки (squeeze_breakout_long/short), выходы по
+  momentum_faded. Ликвидаций нет, баланс держится. Смена стратегии прошла без ошибок БД.
+- Известные мелочи (НЕ баги): (1) "Wallets synced" спамит ~каждые 5с при открытой сделке
+  в cross-режиме; можно приглушить process_throttle_secs. (2) "Failed to enter position"
+  при ручных кнопках Mini App, если маржа 7% < min stake биржи (custom_stake_amount -> 0).
+
 ## 1. ЧТО ЭТО
 Крипто-торговый бот на **Freqtrade 2026.5**, режим **только dry-run** (бумажная торговля,
 виртуальные деньги, `dry_run: true` всегда). Развёрнут на **Railway** (Docker), мониторинг —
