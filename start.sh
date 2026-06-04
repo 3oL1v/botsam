@@ -1,40 +1,33 @@
 #!/bin/bash
-# =============================================================================
-#  Стартовый скрипт контейнера (Railway).
-#  ВАЖНО: dashboard поднимается СРАЗУ и слушает $PORT, чтобы Railway видел,
-#  что приложение отвечает. Бот работает в фоне НЕЗАВИСИМО — если он упадёт
-#  (например, Binance вернёт 451), dashboard всё равно останется доступен и
-#  покажет статус "бот недоступен" вместо "Application failed to respond".
-#
-#  Безопасность: только dry-run. Реальные деньги/ключи не нужны.
-# =============================================================================
+set -euo pipefail
 
-CONFIG="user_data/config_binance_futures_dry.json"
-STRATEGY="CrossSqueezeExpansion4HFilter15m"
-PORT="${PORT:-8091}"
+PORT="${PORT:-8092}"
+PY="${PY:-python3}"
 
-mkdir -p user_data/logs
+mkdir -p logs dashboard/data user_data/logs
 
-# Работаем как ftuser: его python видит uvicorn/fastapi из ~/.local.
-PY="python3"
+start_bot_loop() {
+  local name="$1"
+  local config="$2"
+  local logfile="$3"
 
-# 1) Бот — в фоне, с авто-перезапуском (на случай временного 451 у биржи).
-#    НЕ блокирует старт dashboard.
-(
-  while true; do
-    echo "[start] Запускаю Freqtrade dry-run бота..."
-    freqtrade trade \
-      --config "$CONFIG" \
-      --userdir user_data \
-      --strategy "$STRATEGY" \
-      --logfile user_data/logs/binance_futures_dryrun.log
-    echo "[start] Бот завершился (код $?). Перезапуск через 30 сек..."
-    sleep 30
-  done
-) &
+  (
+    while true; do
+      echo "[${name}] starting Freqtrade dry-run bot with ${config}"
+      freqtrade trade \
+        --config "${config}" \
+        --userdir user_data \
+        --logfile "${logfile}"
+      code="$?"
+      echo "[${name}] exited with code ${code}; restarting in 30 seconds"
+      sleep 30
+    done
+  ) &
+}
 
-# 2) Dashboard/miniapp — СРАЗУ на публичном порту (foreground, держит контейнер).
-#    MINIAPP_ACCESS_TOKEN берётся из переменных окружения Railway.
-export DASHBOARD_CONFIG="$CONFIG"
-echo "[start] Запускаю dashboard/miniapp на 0.0.0.0:$PORT ..."
-exec "$PY" -m uvicorn dashboard.server:app --host 0.0.0.0 --port "$PORT" --log-level warning
+start_bot_loop "volatility" "user_data/config_volatility_dry.json" "logs/volatility.log"
+start_bot_loop "donchian" "user_data/config_donchian_dry.json" "logs/donchian.log"
+start_bot_loop "vwap" "user_data/config_vwap_dry.json" "logs/vwap.log"
+
+echo "[dashboard] starting Mini App dashboard on 0.0.0.0:${PORT}"
+exec "${PY}" -m uvicorn dashboard.server:app --host 0.0.0.0 --port "${PORT}" --log-level info

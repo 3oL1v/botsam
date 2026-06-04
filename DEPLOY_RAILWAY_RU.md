@@ -1,121 +1,61 @@
-# 🚀 Деплой на Railway + Telegram Mini App (пошагово)
+# Деплой на Railway
 
-Цель: бот крутится в облаке Railway (dry-run), а ты смотришь за ним с телефона
-через Telegram Mini App. Реальные деньги НЕ используются.
+Цель: один Railway service запускает 3 Freqtrade dry-run процесса и один Mini App dashboard. Наружу публикуется только dashboard. Freqtrade REST API слушает `127.0.0.1` внутри контейнера.
 
-Код уже в репозитории: **https://github.com/3oL1v/botsam**
+## Важно
 
----
+- Реальная торговля не включается: во всех конфигах `dry_run: true`.
+- Binance Futures может заблокировать Railway/cloud IP ошибкой `451 restricted location`. После деплоя нужно проверять deploy logs и `/api/health`.
+- Railway Quick/Generated Domain даст постоянный HTTPS URL для Telegram Mini App. Cloudflare quick tunnel на Railway не нужен.
 
-## ⚠️ Два важных предупреждения (прочитать!)
+## Через Railway CLI
 
-1. **🔴 ГЛАВНОЕ: Binance блокирует по региону (HTTP 451).** Это уже проявилось:
-   при локальном запуске Binance ответил
-   `451 Service unavailable from a restricted location`.
-   Бот НЕ запускается, если IP в запрещённом регионе — он не может загрузить рынки.
-
-   **Что делать на Railway:**
-   - Сервис → **Settings → Regions** → выбрать **Europe West (Amsterdam)**.
-   - После смены региона → **Redeploy**.
-   - Проверить логи: если снова `451` — значит и EU-IP дата-центра в чёрном списке
-     Binance (так бывает: биржа блокирует диапазоны облачных провайдеров).
-
-   **План Б, если EU тоже даёт 451:**
-   - Попробовать другой регион Railway (например, **Southeast Asia (Singapore)**).
-   - Либо переключить проект на биржу без гео-блокировки (BingX/Bybit/OKX):
-     в `user_data/config_binance_futures_dry.json` поменять `exchange.name`
-     и формат пар, затем `git push` → Railway пересоберёт.
-   - Реально работающий регион подбирается перебором — это ограничение Binance,
-     а не бота.
-
-2. **Стратегия убыточна, плечо 50x = очень высокий риск.** Бэктест показал слив
-   виртуального депозита почти в ноль (см. README_RU.md). Это нормально для теста
-   инфраструктуры, но как «зарабатывающий бот» она НЕ годится. Деньги виртуальные.
-
----
-
-## Шаг 1. Создать проект на Railway
-
-1. Зайди на <https://railway.app> → войди через GitHub.
-2. **New Project** → **Deploy from GitHub repo** → выбери репозиторий `botsam`.
-3. Railway увидит `Dockerfile` и `railway.json` и начнёт сборку сам.
-4. Открой сервис → вкладка **Settings** → блок **Regions** → выбери **Europe West**.
-   (Иначе возможна ошибка Binance 451.)
-
-## Шаг 2. Задать переменные окружения
-
-Открой сервис → вкладка **Variables** → добавь:
-
-| Переменная | Значение | Зачем |
-|---|---|---|
-| `MINIAPP_ACCESS_TOKEN` | придумай длинную случайную строку (32+ симв.) | пароль доступа к Mini App |
-| `PORT` | (Railway задаёт сам — НЕ трогай) | публичный порт |
-
-> API-ключи Binance НЕ нужны — для публичных цен в dry-run они не требуются.
-
-После добавления переменной Railway автоматически передеплоит сервис.
-
-## Шаг 3. Включить публичный домен (HTTPS)
-
-1. Открой сервис → **Settings** → блок **Networking** → **Generate Domain**.
-2. Railway выдаст HTTPS-адрес вида:
-   ```
-   https://botsam-production-xxxx.up.railway.app
-   ```
-3. Проверь в браузере (подставь свой токен из шага 2):
-   ```
-   https://ТВОЙ-АДРЕС.up.railway.app/miniapp?access=ТВОЙ_ТОКЕН
-   ```
-   Должна открыться мобильная страница с балансом 100 USDT и ценой BTC.
-
-## Шаг 4. Проверить, что бот реально работает
-
-В браузере (или с телефона) открой:
-```
-https://ТВОЙ-АДРЕС.up.railway.app/api/miniapp?access=ТВОЙ_ТОКЕН
-```
-Должен прийти JSON с `"dry_run": true`, `"available": true`, балансом и ценой.
-Если видишь ошибку про `451` — вернись в Шаг 1 и смени регион на EU.
-
-## Шаг 5. Привязать Telegram Mini App
-
-1. В Telegram открой **@BotFather** → `/newbot` → задай имя и username бота.
-   (Сохрани токен бота — пригодится, если захочешь уведомления.)
-2. `/newapp` → выбери своего бота → заполни название, описание, картинку.
-3. Когда BotFather попросит **Web App URL**, вставь свой адрес С токеном:
-   ```
-   https://ТВОЙ-АДРЕС.up.railway.app/miniapp?access=ТВОЙ_ТОКЕН
-   ```
-4. BotFather даст ссылку вида `https://t.me/твой_бот/имя_app`.
-   Открой её на телефоне → Mini App запустится прямо в Telegram.
-
-Готово! Теперь дашборд доступен с телефона в один тап из Telegram.
-
----
-
-## Как обновлять бота потом
-
-Любые изменения в коде:
 ```powershell
-cd C:\trade2
-git add -A
-git commit -m "описание изменений"
-git push
+npm install -g @railway/cli
+railway login
+railway link
+railway variables set MINIAPP_ACCESS_TOKEN="длинный_секретный_токен"
+railway up
 ```
-Railway увидит push и пересоберёт сервис автоматически.
 
-## Если что-то не работает — куда смотреть
+После деплоя:
 
-- **Логи Railway**: сервис → вкладка **Deployments** → клик по деплою → **View Logs**.
-  Ищи строки `Dry run is enabled`, `state='RUNNING'`, либо ошибки `451`.
-- **451 от Binance** → смени регион на EU (Шаг 1.4).
-- **401 на /miniapp** → не совпадает `MINIAPP_ACCESS_TOKEN` в URL и в Variables.
-- **Бот не открывает сделки** → это нормально: вход только по сигналу стратегии
-  (EMA-тренд + пробой RSI). Может пройти время до первой сделки.
+```powershell
+railway logs
+railway open
+```
 
-## Безопасность
+В Railway UI открой service -> Settings -> Networking -> Generate Domain.
 
-- `dry_run: true` зашит в конфиг — реальная торговля невозможна без ручной правки.
-- В репозитории НЕТ ключей и паролей (только плейсхолдеры). Все секреты — в Variables.
-- freqUI-API бота (порт 8081) доступен только ВНУТРИ контейнера, наружу не торчит.
-- Наружу смотрит только Mini App, защищённый токеном.
+Mini App URL:
+
+```text
+https://ТВОЙ-ДОМЕН.up.railway.app/miniapp?access=ТВОЙ_ТОКЕН
+```
+
+Health URL:
+
+```text
+https://ТВОЙ-ДОМЕН.up.railway.app/api/health?access=ТВОЙ_ТОКЕН
+```
+
+## Через GitHub
+
+1. Закоммить и запушь изменения в `main`.
+2. Railway -> New Project -> Deploy from GitHub repo -> выбери `botsam`.
+3. Variables -> добавь `MINIAPP_ACCESS_TOKEN`.
+4. Settings -> Networking -> Generate Domain.
+5. Проверяй Deploy Logs.
+
+## Что должно быть в логах
+
+Ищи строки:
+
+```text
+[volatility] starting Freqtrade dry-run bot
+[donchian] starting Freqtrade dry-run bot
+[vwap] starting Freqtrade dry-run bot
+[dashboard] starting Mini App dashboard
+```
+
+Если Binance заблокирует облачный IP, в логах Freqtrade будет ошибка про `451` или невозможность загрузить markets. Dashboard при этом может быть живым, но `/api/health` покажет, что боты недоступны.

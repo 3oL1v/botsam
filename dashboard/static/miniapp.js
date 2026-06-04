@@ -1,333 +1,293 @@
-const tg = window.Telegram?.WebApp;
-if (tg) {
-  tg.ready();
-  tg.expand();
-}
-
 const state = {
-  token: new URLSearchParams(window.location.search).get("access") || localStorage.getItem("miniappAccess") || "",
-  data: null,
-  timer: null,
+  access: new URLSearchParams(window.location.search).get("access") || localStorage.getItem("miniapp_access") || "",
+  pair: "BTC/USDT:USDT",
+  screen: "overview",
+  payload: null,
 };
 
-if (state.token) {
-  localStorage.setItem("miniappAccess", state.token);
+if (state.access) {
+  localStorage.setItem("miniapp_access", state.access);
 }
 
-const $ = (id) => document.getElementById(id);
+if (window.Telegram?.WebApp) {
+  window.Telegram.WebApp.ready();
+  window.Telegram.WebApp.expand();
+  window.Telegram.WebApp.setHeaderColor("#071018");
+  window.Telegram.WebApp.setBackgroundColor("#071018");
+}
 
-const formatNumber = (value, digits = 2) => {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
-  const number = Number(value);
-  if (Math.abs(number) >= 1000) return number.toLocaleString("en-US", { maximumFractionDigits: digits });
-  if (Math.abs(number) >= 1) return number.toLocaleString("en-US", { maximumFractionDigits: digits });
-  return number.toLocaleString("en-US", { maximumFractionDigits: 6 });
-};
+const fmt = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
+const money = (value) => `${fmt.format(Number(value || 0))} USDT`;
+const pct = (value) => `${Number(value || 0) >= 0 ? "+" : ""}${Number(value || 0).toFixed(2)}%`;
+const cls = (value) => (Number(value || 0) >= 0 ? "positive" : "negative");
+const coin = (pair) => (pair || "?").split("/")[0]?.slice(0, 3) || "?";
+const displayPair = (pair) => String(pair || "--").replace(":USDT", "");
+const shortStrategy = (name) =>
+  String(name || "")
+    .replace("VolatilitySqueezeBreakoutAggressive", "Volatility")
+    .replace("DonchianVolumeBurst5m", "Donchian")
+    .replace("VWAPPullbackMomentumScalp", "VWAP");
 
-const formatMoney = (value, currency = "USDT") => {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
-  return `${formatNumber(value, 2)} ${currency}`;
-};
+function apiUrl(path) {
+  const url = new URL(path, window.location.origin);
+  if (state.access) url.searchParams.set("access", state.access);
+  return url.toString();
+}
 
-const formatPercent = (value, digits = 2) => {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
-  const number = Number(value);
-  return `${number > 0 ? "+" : ""}${number.toFixed(digits)}%`;
-};
-
-const setSigned = (element, value) => {
-  element.textContent = formatPercent(value);
-  element.classList.toggle("down", Number(value) < 0);
-  element.classList.toggle("up", Number(value) >= 0);
-};
-
-async function getJson(url) {
-  const headers = state.token ? { "X-Miniapp-Token": state.token } : {};
-  const response = await fetch(url, { headers, cache: "no-store" });
-  if (!response.ok) throw new Error(response.status === 401 ? "Нет доступа" : `${response.status} ${response.statusText}`);
+async function fetchJson(path) {
+  const response = await fetch(apiUrl(path), {
+    headers: state.access ? { "x-miniapp-token": state.access } : {},
+  });
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
   return response.json();
 }
 
-async function postJson(url, payload) {
-  const headers = { "Content-Type": "application/json" };
-  if (state.token) headers["X-Miniapp-Token"] = state.token;
-  const response = await fetch(url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload),
-    cache: "no-store",
-  });
-  let data = {};
-  try { data = await response.json(); } catch (_) { /* пусто */ }
-  if (!response.ok) {
-    const detail = data.detail ? (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail)) : `${response.status}`;
-    throw new Error(detail);
+function setText(id, value) {
+  const node = document.getElementById(id);
+  if (node) node.textContent = value;
+}
+
+function setRunState(summary) {
+  const node = document.getElementById("runState");
+  const dot = node.querySelector(".state-dot");
+  const allGood = summary?.dry_run_all && summary?.bots_online === summary?.bots_total;
+  dot.classList.toggle("warn", !allGood);
+  node.querySelector("span:last-child").textContent = allGood ? "Bot Running" : "Degraded";
+}
+
+function renderSummary(payload) {
+  const { summary } = payload;
+  setRunState(summary);
+  document.getElementById("totalBalance").innerHTML = `${fmt.format(summary.total_balance)} <small>USDT</small>`;
+  setText("totalPnl", `${money(summary.total_profit_abs)} (${pct(summary.total_profit_pct)})`);
+  document.getElementById("totalPnl").className = `pnl ${cls(summary.total_profit_abs)}`;
+  setText("openCount", String(summary.open_trades));
+  setText("botsOnline", `${summary.bots_online}/${summary.bots_total}`);
+  setText("dryState", summary.dry_run_all ? "Dry" : "CHECK");
+  setText("updatedAt", new Date(payload.generated_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }));
+
+  const points = payload.bots.map((bot, index) => 28 - Number(bot.profit_pct || 0) * 2 + index * 7);
+  const path = points.length
+    ? points.map((y, i) => `${i === 0 ? "M" : "L"} ${2 + i * 56} ${Math.max(4, Math.min(50, y))}`).join(" ")
+    : "M2 34 L58 18 L118 8";
+  document.getElementById("sparkPath").setAttribute("d", path);
+}
+
+function renderStrategies(bots) {
+  const root = document.getElementById("strategyStrip");
+  root.innerHTML = bots
+    .map(
+      (bot, index) => `
+        <article class="strategy-card ${index === 0 ? "active" : ""}">
+          <header>
+            <span>${bot.status}</span>
+            <i class="status-dot ${bot.status === "online" ? "" : "offline"}"></i>
+          </header>
+          <h3>${bot.label}</h3>
+          <strong class="${cls(bot.profit_abs)}">${money(bot.profit_abs)}</strong>
+          <small>${bot.open_count} open · ${Number(bot.win_rate || 0).toFixed(1)}% win</small>
+        </article>`
+    )
+    .join("");
+}
+
+function renderOpenTrades(trades) {
+  const root = document.getElementById("openTrades");
+  if (!trades.length) {
+    root.innerHTML = `<div class="empty">Открытых dry-run сделок сейчас нет</div>`;
+    return;
   }
-  return data;
+  root.innerHTML = trades
+    .map(
+      (trade) => `
+        <article class="trade-card">
+          <div class="trade-top">
+            <div class="coin">${coin(trade.pair)}</div>
+            <div class="trade-title">
+              <strong>${displayPair(trade.pair)}</strong>
+              <span>${shortStrategy(trade.strategy)} · ${trade.leverage || 1}x · ${trade.entry_tag || "signal"}</span>
+            </div>
+            <div>
+              <div class="side-pill ${trade.side === "short" ? "negative" : "positive"}">${trade.side.toUpperCase()}</div>
+              <strong class="${cls(trade.profit_pct)}">${pct(trade.profit_pct)}</strong>
+            </div>
+          </div>
+          <div class="trade-grid">
+            <div><span>Entry</span><strong>${fmt.format(trade.open_rate)}</strong></div>
+            <div><span>Current</span><strong>${fmt.format(trade.current_rate || trade.open_rate)}</strong></div>
+            <div><span>P/L</span><strong class="${cls(trade.profit_abs)}">${money(trade.profit_abs)}</strong></div>
+            <div><span>Margin</span><strong>${money(trade.stake_amount)}</strong></div>
+            <div><span>Held</span><strong>${trade.hold_minutes ?? 0}m</strong></div>
+            <div><span>Bot</span><strong>${trade.bot_label}</strong></div>
+          </div>
+        </article>`
+    )
+    .join("");
 }
 
-function fitCanvas(canvas) {
-  const ratio = window.devicePixelRatio || 1;
-  const rect = canvas.getBoundingClientRect();
-  canvas.width = Math.max(1, Math.floor(rect.width * ratio));
-  canvas.height = Math.max(1, Math.floor(rect.height * ratio));
-  const context = canvas.getContext("2d");
-  context.setTransform(ratio, 0, 0, ratio, 0, 0);
-  return { context, width: rect.width, height: rect.height };
-}
-
-function drawSpark(rows) {
-  const canvas = $("priceSpark");
-  const { context, width, height } = fitCanvas(canvas);
-  context.clearRect(0, 0, width, height);
-  // Светлый фон под график (под общий ЧБ-стиль)
-  context.fillStyle = "rgba(255,255,255,0.4)";
-  context.fillRect(0, 0, width, height);
-
-  if (!rows || rows.length < 2) return;
-  const closes = rows.map((row) => Number(row.close)).filter((value) => Number.isFinite(value));
-  if (closes.length < 2) return;
-
-  const min = Math.min(...closes);
-  const max = Math.max(...closes);
-  const range = max - min || 1;
-  const pad = 16;
-
-  // Тонкая сетка
-  context.strokeStyle = "rgba(0,0,0,0.06)";
-  context.lineWidth = 1;
-  for (let i = 1; i <= 3; i += 1) {
-    const y = pad + ((height - pad * 2) * i) / 4;
-    context.beginPath();
-    context.moveTo(0, y);
-    context.lineTo(width, y);
-    context.stroke();
-  }
-
-  const points = closes.map((close, index) => {
-    const x = pad + (index / (closes.length - 1)) * (width - pad * 2);
-    const y = height - pad - ((close - min) / range) * (height - pad * 2);
-    return [x, y];
-  });
-
-  // Линия — насыщенно-тёмная (монохром)
-  context.beginPath();
-  points.forEach(([x, y], i) => (i === 0 ? context.moveTo(x, y) : context.lineTo(x, y)));
-  context.strokeStyle = "#0a0a0b";
-  context.lineWidth = 2;
-  context.lineJoin = "round";
-  context.stroke();
-
-  // Заливка под линией — лёгкий серый градиент
-  context.lineTo(width - pad, height - pad);
-  context.lineTo(pad, height - pad);
-  context.closePath();
-  const fill = context.createLinearGradient(0, pad, 0, height - pad);
-  fill.addColorStop(0, "rgba(10,10,11,0.12)");
-  fill.addColorStop(1, "rgba(10,10,11,0)");
-  context.fillStyle = fill;
-  context.fill();
-}
-
-function tradeCard(trade) {
-  const profit = Number(trade.profit_percent || 0);
-  const sideClass = trade.is_short ? "short" : "long";
-  const rate = trade.is_open ? trade.current_rate : trade.close_rate;
-  return `
-    <article class="trade-card">
-      <div class="trade-main">
-        <div class="trade-pair">
-          <strong>${trade.pair || "-"}</strong>
-          <span class="side ${sideClass}">${trade.side || "-"}</span>
-        </div>
-        <div class="trade-profit">
-          <strong class="${profit < 0 ? "down" : "up"}">${formatPercent(profit)}</strong>
-          <span>${formatMoney(trade.profit_abs, "USDT")}</span>
-        </div>
-      </div>
-      <div class="trade-meta">
-        <div>
-          <span>Вход</span>
-          <strong>${formatNumber(trade.open_rate, 6)}</strong>
-        </div>
-        <div>
-          <span>${trade.is_open ? "Сейчас" : "Выход"}</span>
-          <strong>${formatNumber(rate, 6)}</strong>
-        </div>
-        <div>
-          <span>Stake</span>
-          <strong>${formatMoney(trade.stake_amount, "USDT")}</strong>
-        </div>
-      </div>
-    </article>
-  `;
-}
-
-function emptyCard(title, text) {
-  return `
-    <div class="empty-card">
-      <div>
-        <strong>${title}</strong>
-        <span>${text}</span>
-      </div>
-    </div>
-  `;
-}
-
-function renderTrades() {
-  const open = state.data?.open_trades || [];
-  const recent = state.data?.recent_trades || [];
-
-  $("openSubtitle").textContent = `${open.length} active`;
-  $("historySubtitle").textContent = `${recent.length} closed`;
-
-  $("openTrades").innerHTML = open.length
-    ? open.map(tradeCard).join("")
-    : emptyCard("Открытых сделок нет", "Бот ждёт сигнал стратегии.");
-
-  $("recentTrades").innerHTML = recent.length
-    ? recent.map(tradeCard).join("")
-    : emptyCard("История пустая", "Закрытые dry-run сделки появятся здесь.");
-
-  // Вкладка "Управление": список открытых сделок с кнопкой закрытия
-  $("controlOpenSub").textContent = `${open.length} открыто`;
-  $("controlOpenTrades").innerHTML = open.length
-    ? open.map(controlTradeCard).join("")
-    : emptyCard("Нет открытых сделок", "Открой тестовую сделку кнопкой выше.");
-  document.querySelectorAll(".btn-close").forEach((btn) => {
-    btn.addEventListener("click", () => closeTrade(btn.dataset.id));
+function renderPairTabs(pairs) {
+  const root = document.getElementById("pairTabs");
+  root.innerHTML = pairs
+    .map((pair) => `<button class="pair-tab ${pair === state.pair ? "active" : ""}" data-pair="${pair}" type="button">${coin(pair)}</button>`)
+    .join("");
+  root.querySelectorAll(".pair-tab").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.pair = button.dataset.pair;
+      refresh();
+    });
   });
 }
 
-// Карточка открытой сделки с кнопкой "Закрыть"
-function controlTradeCard(trade) {
-  const profit = Number(trade.profit_percent || 0);
-  const sideClass = trade.is_short ? "short" : "long";
-  return `
-    <article class="trade-card">
-      <div class="trade-main">
-        <div class="trade-pair">
-          <strong>#${trade.id ?? "?"} ${trade.pair || "-"}</strong>
-          <span class="side ${sideClass}">${trade.side || "-"}</span>
-        </div>
-        <div class="trade-profit">
-          <strong class="${profit < 0 ? "down" : "up"}">${formatPercent(profit)}</strong>
-          <span>${formatMoney(trade.profit_abs, "USDT")}</span>
-        </div>
-      </div>
-      <button class="btn-close" type="button" data-id="${trade.id}">✕ Закрыть #${trade.id}</button>
-    </article>
-  `;
+function renderOrderbook(orderbook) {
+  setText("bookSymbol", orderbook.symbol || "--");
+  const rows = [
+    ...(orderbook.asks || []).slice(0, 5).reverse().map((row) => ({ ...row, side: "ask" })),
+    ...(orderbook.bids || []).slice(0, 5).map((row) => ({ ...row, side: "bid" })),
+  ];
+  document.getElementById("orderbook").innerHTML = rows.length
+    ? rows
+        .map(
+          (row) => `
+            <div class="book-row ${row.side}" style="--depth:${Math.max(8, row.depth * 100).toFixed(1)}%">
+              <span>${fmt.format(row.price)}</span>
+              <strong>${Number(row.size).toFixed(3)}</strong>
+            </div>`
+        )
+        .join("")
+    : `<div class="empty">Стакан недоступен</div>`;
 }
 
-function setControlMsg(text, kind) {
-  const el = $("controlMsg");
-  el.textContent = text || "";
-  el.className = "control-msg" + (kind ? " " + kind : "");
-}
-
-function fillPairSelect() {
-  const select = $("pairSelect");
-  const pairs = state.data?.pairs || [];
-  if (!pairs.length || select.dataset.filled === String(pairs.length)) return;
-  select.innerHTML = pairs.map((p) => `<option value="${p}">${p}</option>`).join("");
-  select.dataset.filled = String(pairs.length);
-}
-
-async function openTrade(side) {
-  const pair = $("pairSelect").value;
-  if (!pair) { setControlMsg("Сначала выбери пару", "err"); return; }
-  setControlMsg(`Открываю ${side === "short" ? "шорт" : "лонг"} ${pair}...`, "");
-  $("btnLong").disabled = true;
-  $("btnShort").disabled = true;
-  try {
-    await postJson("/api/control/forceenter", { pair, side });
-    setControlMsg(`✓ Заявка отправлена: ${side === "short" ? "ШОРТ" : "ЛОНГ"} ${pair}`, "ok");
-    setTimeout(refresh, 1500);
-  } catch (error) {
-    setControlMsg("Ошибка: " + error.message, "err");
-  } finally {
-    $("btnLong").disabled = false;
-    $("btnShort").disabled = false;
-  }
-}
-
-async function closeTrade(tradeid) {
-  setControlMsg(`Закрываю сделку #${tradeid}...`, "");
-  try {
-    await postJson("/api/control/forceexit", { tradeid });
-    setControlMsg(`✓ Сделка #${tradeid} закрывается`, "ok");
-    setTimeout(refresh, 1500);
-  } catch (error) {
-    setControlMsg("Ошибка: " + error.message, "err");
-  }
-}
-
-function render(data) {
-  state.data = data;
-  const context = data.context || {};
-  const summary = data.summary || {};
-  const market = data.market || {};
-  const stake = context.stake_currency || "USDT";
-
-  $("statusDot").classList.toggle("on", Boolean(summary.available));
-  $("runState").textContent = summary.available ? "Running" : "Offline";
-  $("exchangeMode").textContent = `${context.exchange || "-"} ${context.trading_mode || "-"}`;
-  $("strategyName").textContent = context.strategy || context.bot_name || "Freqtrade";
-
-  $("profitValue").textContent = formatMoney(summary.profit_all_coin || 0, stake);
-  setSigned($("profitPercent"), summary.profit_all_percent || 0);
-  $("balanceValue").textContent = formatMoney(summary.balance_total ?? summary.balance_value, stake);
-  $("openCount").textContent = `${summary.open_trades || 0} / ${summary.max_open_trades || 0}`;
-  $("winRate").textContent = formatPercent(summary.winrate || 0);
-
-  $("marketPair").textContent = market.pair || "-";
-  $("marketPrice").textContent = formatNumber(market.last, 3);
-  setSigned($("marketChange"), market.change24h || 0);
-  $("rsiValue").textContent = market.rsi === null || market.rsi === undefined ? "-" : Number(market.rsi).toFixed(1);
-  $("rsiValue").className = Number(market.rsi) >= 70 ? "down" : Number(market.rsi) <= 35 ? "up" : "";
-
-  const fg = market.fear_greed || {};
-  $("fearGreed").textContent = fg.available ? `${fg.value} ${fg.classification}` : "-";
+function renderIndicators(market) {
+  const fear = market.fear_greed || {};
+  setText("fearValue", fear.value ?? "--");
+  setText("fearLabel", fear.label || "--");
+  setText("fearYesterday", `Yesterday: ${fear.yesterday ?? "--"}`);
 
   const funding = market.funding || {};
-  $("fundingRate").textContent = funding.available ? formatPercent(funding.percent, 4) : "-";
-  $("fundingRate").className = Number(funding.percent) < 0 ? "down" : "up";
+  document.getElementById("fundingList").innerHTML = Object.entries(funding)
+    .filter(([, value]) => typeof value === "object")
+    .map(([symbol, value]) => {
+      const rate = Number(value.rate || 0);
+      return `<div class="compact-row"><span>${symbol.replace("USDT", "")}</span><strong class="${cls(rate)}">${rate >= 0 ? "+" : ""}${rate.toFixed(4)}%</strong></div>`;
+    })
+    .join("") || `<div class="empty">Funding недоступен</div>`;
 
-  drawSpark(market.chart || []);
-  renderTrades();
-  fillPairSelect();
+  const rsi = market.rsi || {};
+  document.getElementById("rsiList").innerHTML = Object.entries(rsi)
+    .filter(([, value]) => typeof value === "number")
+    .map(([symbol, value]) => {
+      const color = value >= 70 ? "negative" : value <= 35 ? "positive" : "";
+      return `<div class="compact-row"><span>${symbol.replace("USDT", "")}</span><strong class="${color}">${value.toFixed(1)}</strong></div>`;
+    })
+    .join("") || `<div class="empty">RSI недоступен</div>`;
+}
 
-  $("updatedAt").textContent = new Date(data.updated_at || Date.now()).toLocaleTimeString();
-  $("errorLine").textContent = (data.errors || []).slice(0, 1).join("");
+function renderBotDetails(bots) {
+  document.getElementById("botDetails").innerHTML = bots
+    .map(
+      (bot) => `
+        <article class="bot-row">
+          <header>
+            <h3>${bot.label}</h3>
+            <span class="${bot.status === "online" ? "positive" : "negative"}">${bot.status}</span>
+          </header>
+          <div class="bot-metrics">
+            <div><span>P/L</span><strong class="${cls(bot.profit_abs)}">${money(bot.profit_abs)}</strong></div>
+            <div><span>Open</span><strong>${bot.open_count}</strong></div>
+            <div><span>Win rate</span><strong>${Number(bot.win_rate || 0).toFixed(1)}%</strong></div>
+            <div><span>Port</span><strong>${bot.port}</strong></div>
+            <div><span>Margin</span><strong>${bot.margin_mode}</strong></div>
+            <div><span>State</span><strong>${bot.state}</strong></div>
+          </div>
+        </article>`
+    )
+    .join("");
+}
+
+function renderJournal(journal) {
+  setText("journalCount", String(journal.length));
+  document.getElementById("journal").innerHTML = journal.length
+    ? journal
+        .map((row) => {
+          const params = row.strategy_snapshot || {};
+          return `
+            <article class="journal-row">
+              <div class="event-icon">${row.status === "closed" ? "✓" : "↗"}</div>
+              <div class="journal-main">
+                <strong>${displayPair(row.pair)} · ${shortStrategy(row.strategy)}</strong>
+                <span>${row.side?.toUpperCase() || "--"} · ${row.entry_tag || "signal"} · SL ${params.stoploss ?? "--"} · ROI ${JSON.stringify(params.minimal_roi || {})}</span>
+              </div>
+              <div class="journal-meta">
+                <div class="${cls(row.profit_abs)}">${money(row.profit_abs)}</div>
+                <div>${row.status}</div>
+              </div>
+            </article>`;
+        })
+        .join("")
+    : `<div class="empty">Журнал пуст. Записи появятся при первых dry-run сделках.</div>`;
+}
+
+function renderHealth(payload) {
+  const rows = payload.bots.map((bot) => ({
+    title: `${shortStrategy(bot.strategy)} · ${bot.port}`,
+    ok: bot.status === "online",
+    detail: `${bot.state || "unknown"} · dry-run ${bot.dry_run ? "true" : "check"}`,
+  }));
+  rows.push({
+    title: "Mini App API",
+    ok: true,
+    detail: payload.access_enabled ? "token protected" : "local open",
+  });
+  document.getElementById("healthList").innerHTML = rows
+    .map(
+      (row) => `
+        <article class="health-row">
+          <header>
+            <h3>${row.title}</h3>
+            <span class="${row.ok ? "positive" : "negative"}">${row.ok ? "OK" : "DOWN"}</span>
+          </header>
+          <span class="muted">${row.detail}</span>
+        </article>`
+    )
+    .join("");
+}
+
+function render(payload) {
+  state.payload = payload;
+  renderSummary(payload);
+  renderStrategies(payload.bots);
+  renderOpenTrades(payload.open_trades);
+  renderPairTabs(payload.pairs);
+  renderOrderbook(payload.market.orderbook || {});
+  renderIndicators(payload.market || {});
+  renderBotDetails(payload.bots);
+  renderJournal(payload.journal);
+  renderHealth(payload);
+}
+
+function setScreen(name) {
+  state.screen = name;
+  document.querySelectorAll("[data-screen]").forEach((node) => node.classList.toggle("hidden", node.dataset.screen !== name));
+  if (name === "overview") {
+    document.querySelectorAll('[data-screen="overview"]').forEach((node) => node.classList.remove("hidden"));
+  }
+  document.querySelectorAll(".nav-item").forEach((button) => button.classList.toggle("active", button.dataset.target === name));
 }
 
 async function refresh() {
-  $("refreshBtn").disabled = true;
   try {
-    render(await getJson("/api/miniapp"));
+    const payload = await fetchJson(`/api/miniapp?pair=${encodeURIComponent(state.pair)}`);
+    render(payload);
   } catch (error) {
-    $("statusDot").classList.remove("on");
-    $("runState").textContent = "Offline";
-    $("errorLine").textContent = error.message;
-  } finally {
-    $("refreshBtn").disabled = false;
+    document.getElementById("runState").innerHTML = `<span class="state-dot warn"></span><span>Ошибка</span>`;
+    document.getElementById("openTrades").innerHTML = `<div class="empty">API недоступен: ${error.message}</div>`;
   }
 }
 
-document.querySelectorAll(".tab").forEach((button) => {
-  button.addEventListener("click", () => {
-    document.querySelectorAll(".tab").forEach((item) => item.classList.remove("active"));
-    document.querySelectorAll(".view").forEach((item) => item.classList.remove("active"));
-    button.classList.add("active");
-    $(`view-${button.dataset.tab}`).classList.add("active");
-  });
+document.querySelectorAll(".nav-item").forEach((button) => {
+  button.addEventListener("click", () => setScreen(button.dataset.target));
 });
 
-$("refreshBtn").addEventListener("click", refresh);
-$("btnLong").addEventListener("click", () => openTrade("long"));
-$("btnShort").addEventListener("click", () => openTrade("short"));
-window.addEventListener("resize", () => state.data && drawSpark(state.data.market?.chart || []));
-
+setScreen("overview");
 refresh();
-state.timer = window.setInterval(refresh, 10000);
+setInterval(refresh, 5000);

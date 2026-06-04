@@ -10,6 +10,8 @@ user_data/data/
 user_data/backtest_results/
 user_data/hyperopt_results/
 user_data/notebooks/
+dashboard/data/
+logs/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
@@ -34,3 +36,7 @@ ui_install.log
 
 # Dashboard screenshots (not needed for deploy)
 dashboard/*.png
+
+# Research reports and large backtest artifacts.
+research/
+output/

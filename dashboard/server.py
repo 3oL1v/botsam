@@ -1,648 +1,717 @@
 from __future__ import annotations
 
+import importlib.util
 import json
-import math
 import os
+import sqlite3
+import sys
 import time
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import ccxt
 import requests
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from requests.auth import HTTPBasicAuth
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG_PATH = Path(os.environ.get("DASHBOARD_CONFIG", "user_data/config.json"))
-if not CONFIG_PATH.is_absolute():
-    CONFIG_PATH = ROOT / CONFIG_PATH
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+DATA_DIR = Path(__file__).resolve().parent / "data"
+JOURNAL_DB = DATA_DIR / "trade_journal.sqlite"
+STRATEGY_DIR = ROOT / "user_data" / "strategies"
 
-MARKET_TTL = 8
-FNG_TTL = 60 * 20
-BOT_TTL = 5
-MINIAPP_TTL = 5
-def env_setting(name: str, default: str = "") -> str:
-    value = os.environ.get(name)
-    if value:
-        return value.strip()
+PAIRS = ["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "BNB/USDT:USDT"]
+MARKET_SYMBOLS = {
+    "BTC/USDT:USDT": "BTCUSDT",
+    "ETH/USDT:USDT": "ETHUSDT",
+    "SOL/USDT:USDT": "SOLUSDT",
+    "BNB/USDT:USDT": "BNBUSDT",
+}
+
+BOT_CONFIG_PATHS = [
+    ROOT / "user_data" / "config_volatility_dry.json",
+    ROOT / "user_data" / "config_donchian_dry.json",
+    ROOT / "user_data" / "config_vwap_dry.json",
+]
+
+
+def load_env() -> dict[str, str]:
+    values: dict[str, str] = {}
     env_path = ROOT / ".env"
     if env_path.exists():
         for line in env_path.read_text(encoding="utf-8").splitlines():
-            if line.strip().startswith(f"{name}="):
-                return line.split("=", 1)[1].strip().strip('"').strip("'")
-    return default
-
-
-MINIAPP_ACCESS_TOKEN = env_setting("MINIAPP_ACCESS_TOKEN")
-
-app = FastAPI(title="Dry Market Dashboard", docs_url=None, redoc_url=None)
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-
-_cache: dict[str, tuple[float, Any]] = {}
-_exchange_clients: dict[str, Any] = {}
-
-
-def _now() -> float:
-    return time.time()
-
-
-def _cached(key: str, ttl: int, loader):
-    item = _cache.get(key)
-    if item and _now() - item[0] < ttl:
-        return item[1]
-    value = loader()
-    _cache[key] = (_now(), value)
-    return value
-
-
-def load_config() -> dict[str, Any]:
-    with CONFIG_PATH.open("r", encoding="utf-8") as file:
-        return json.load(file)
-
-
-def market_context() -> dict[str, Any]:
-    config = load_config()
-    exchange = config.get("exchange", {})
-    return {
-        "exchange": exchange.get("name", "unknown"),
-        "trading_mode": config.get("trading_mode", "spot"),
-        "timeframe": config.get("timeframe", "1h"),
-        "stake_currency": config.get("stake_currency", "USDT"),
-        "config": str(CONFIG_PATH),
-        "dry_run": config.get("dry_run") is True,
-    }
-
-
-def configured_pairs() -> list[str]:
-    config = load_config()
-    return list(config["exchange"]["pair_whitelist"])
-
-
-def _merged_ccxt_config(default_type: str | None = None) -> dict[str, Any]:
-    config = load_config()
-    exchange_config = config.get("exchange", {})
-    raw = exchange_config.get("ccxt_config", {})
-    merged: dict[str, Any] = {"timeout": 15000, "enableRateLimit": True}
-    if isinstance(raw, dict):
-        merged.update({key: value for key, value in raw.items() if key != "options"})
-    options = dict(raw.get("options", {}) if isinstance(raw, dict) else {})
-    if default_type:
-        options["defaultType"] = default_type
-    if options:
-        merged["options"] = options
-    return merged
-
-
-def exchange_client(kind: str = "market"):
-    context = market_context()
-    exchange_name = context["exchange"]
-    trading_mode = context["trading_mode"]
-    default_type = "swap" if trading_mode == "futures" or kind == "funding" else "spot"
-    cache_key = f"{exchange_name}:{default_type}:{kind}:{CONFIG_PATH}"
-
-    if cache_key not in _exchange_clients:
-        exchange_class = getattr(ccxt, exchange_name)
-        _exchange_clients[cache_key] = exchange_class(_merged_ccxt_config(default_type))
-
-    return _exchange_clients[cache_key]
-
-
-def safe_float(value: Any) -> float | None:
-    try:
-        if value is None:
-            return None
-        number = float(value)
-        if math.isnan(number) or math.isinf(number):
-            return None
-        return number
-    except Exception:
-        return None
-
-
-def round_opt(value: Any, digits: int = 8) -> float | None:
-    number = safe_float(value)
-    return None if number is None else round(number, digits)
-
-
-def calc_rsi(closes: list[float], period: int = 14) -> list[float | None]:
-    if len(closes) <= period:
-        return [None for _ in closes]
-
-    values: list[float | None] = [None for _ in closes]
-    gains = [max(closes[i] - closes[i - 1], 0) for i in range(1, period + 1)]
-    losses = [max(closes[i - 1] - closes[i], 0) for i in range(1, period + 1)]
-    avg_gain = sum(gains) / period
-    avg_loss = sum(losses) / period
-
-    values[period] = 100.0 if avg_loss == 0 else 100 - (100 / (1 + avg_gain / avg_loss))
-
-    for i in range(period + 1, len(closes)):
-        change = closes[i] - closes[i - 1]
-        gain = max(change, 0)
-        loss = max(-change, 0)
-        avg_gain = (avg_gain * (period - 1) + gain) / period
-        avg_loss = (avg_loss * (period - 1) + loss) / period
-        values[i] = 100.0 if avg_loss == 0 else 100 - (100 / (1 + avg_gain / avg_loss))
-
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            values[key.strip()] = value.strip().strip('"').strip("'")
     return values
 
 
-def normalize_orderbook(entries: list[list[float]], depth: int) -> list[dict[str, float]]:
-    rows = []
-    total = 0.0
-    for price, amount, *_ in entries[:depth]:
-        total += float(amount)
-        rows.append(
-            {
-                "price": float(price),
-                "amount": float(amount),
-                "total": total,
-            }
-        )
-    return rows
+ENV = load_env()
+ACCESS_TOKEN = os.environ.get("MINIAPP_ACCESS_TOKEN") or ENV.get("MINIAPP_ACCESS_TOKEN", "")
+
+app = FastAPI(title="Dry-Run Mini App", docs_url=None, redoc_url=None)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+_cache: dict[str, tuple[float, Any]] = {}
 
 
-def funding_symbol(pair: str) -> str:
-    if ":" in pair:
-        return pair
-    base = pair.split("/")[0]
-    quote = pair.split("/")[1].split(":")[0] if "/" in pair else "USDT"
-    if base == "TONCOIN":
-        base = "TON"
-    return f"{base}/{quote}:{quote}"
+@dataclass(frozen=True)
+class BotTarget:
+    bot_id: str
+    label: str
+    config_path: Path
+    base_url: str
+    username: str
+    password: str
+    strategy: str
+    port: int
 
 
-def fetch_funding(pair: str) -> dict[str, Any]:
-    symbol = funding_symbol(pair)
-    context = market_context()
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def safe_float(value: Any, default: float = 0.0) -> float:
     try:
-        data = exchange_client("funding").fetch_funding_rate(symbol)
-        rate = safe_float(data.get("fundingRate"))
-        return {
-            "symbol": symbol,
-            "rate": rate,
-            "percent": None if rate is None else round(rate * 100, 5),
-            "datetime": data.get("datetime"),
-            "source": f"{context['exchange']} perpetual public data",
-            "available": True,
-        }
-    except Exception as exc:
-        return {
-            "symbol": symbol,
-            "rate": None,
-            "percent": None,
-            "datetime": None,
-            "source": f"{context['exchange']} perpetual public data",
-            "available": False,
-            "error": str(exc)[:180],
-        }
+        if value is None or value == "":
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
-def fetch_fear_greed() -> dict[str, Any]:
-    def loader():
+def safe_int(value: Any, default: int = 0) -> int:
+    try:
+        if value is None or value == "":
+            return default
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def pick(data: dict[str, Any] | None, keys: list[str], default: Any = None) -> Any:
+    if not isinstance(data, dict):
+        return default
+    for key in keys:
+        if key in data and data[key] is not None:
+            return data[key]
+    return default
+
+
+def parse_datetime(value: Any) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, (int, float)):
+        if value > 10_000_000_000:
+            value = value / 1000
+        return datetime.fromtimestamp(value, tz=timezone.utc)
+    if isinstance(value, str):
+        text = value.replace("Z", "+00:00")
         try:
-            response = requests.get("https://api.alternative.me/fng/?limit=1", timeout=15)
-            response.raise_for_status()
-            row = response.json()["data"][0]
-            return {
-                "value": int(row["value"]),
-                "classification": row["value_classification"],
-                "timestamp": int(row["timestamp"]),
-                "available": True,
-            }
-        except Exception as exc:
-            return {"value": None, "classification": "Unavailable", "available": False, "error": str(exc)[:180]}
-
-    return _cached("fear_greed", FNG_TTL, loader)
-
-
-def fetch_bot_state() -> dict[str, Any]:
-    def loader():
-        config = load_config()
-        api_config = config.get("api_server", {})
-        base_url = f"http://{api_config.get('listen_ip_address', '127.0.0.1')}:{api_config.get('listen_port', 8080)}"
-        username = api_config.get("username", "")
-        password = api_config.get("password", "")
-        state: dict[str, Any] = {
-            "dry_run": config.get("dry_run") is True,
-            "trading_mode": config.get("trading_mode"),
-            "timeframe": config.get("timeframe"),
-            "exchange": config.get("exchange", {}).get("name"),
-            "pairs": configured_pairs(),
-            "freqtrade_api": base_url,
-            "available": False,
-        }
-        try:
-            token_response = requests.post(
-                f"{base_url}/api/v1/token/login",
-                auth=HTTPBasicAuth(username, password),
-                timeout=5,
-            )
-            token_response.raise_for_status()
-            token = token_response.json()["access_token"]
-            headers = {"Authorization": f"Bearer {token}"}
-            count = requests.get(f"{base_url}/api/v1/count", headers=headers, timeout=5).json()
-            profit = requests.get(f"{base_url}/api/v1/profit", headers=headers, timeout=5).json()
-            state.update(
-                {
-                    "available": True,
-                    "open_trades": count.get("current", 0),
-                    "max_open_trades": count.get("max", 0),
-                    "total_stake": count.get("total_stake", 0),
-                    "trade_count": profit.get("trade_count", 0),
-                    "closed_trade_count": profit.get("closed_trade_count", 0),
-                    "profit_all_percent": profit.get("profit_all_percent", 0),
-                    "profit_all_coin": profit.get("profit_all_coin", 0),
-                    "winrate": profit.get("winrate", 0),
-                }
-            )
-        except Exception as exc:
-            state["error"] = str(exc)[:180]
-        return state
-
-    return _cached("bot_state", BOT_TTL, loader)
-
-
-def _freqtrade_api_base() -> tuple[str, str, str]:
-    config = load_config()
-    api_config = config.get("api_server", {})
-    base_url = f"http://{api_config.get('listen_ip_address', '127.0.0.1')}:{api_config.get('listen_port', 8080)}"
-    return base_url, api_config.get("username", ""), api_config.get("password", "")
-
-
-def _freqtrade_token() -> str:
-    base_url, username, password = _freqtrade_api_base()
-    response = requests.post(
-        f"{base_url}/api/v1/token/login",
-        auth=HTTPBasicAuth(username, password),
-        timeout=5,
-    )
-    response.raise_for_status()
-    return str(response.json()["access_token"])
-
-
-def freqtrade_api_get(path: str, params: dict[str, Any] | None = None) -> Any:
-    base_url, _, _ = _freqtrade_api_base()
-    token = _freqtrade_token()
-    response = requests.get(
-        f"{base_url}/api/v1/{path}",
-        headers={"Authorization": f"Bearer {token}"},
-        params=params,
-        timeout=8,
-    )
-    response.raise_for_status()
-    return response.json()
-
-
-def freqtrade_api_post(path: str, payload: dict[str, Any]) -> Any:
-    """POST в Freqtrade REST API (для forceenter/forceexit)."""
-    base_url, _, _ = _freqtrade_api_base()
-    token = _freqtrade_token()
-    response = requests.post(
-        f"{base_url}/api/v1/{path}",
-        headers={"Authorization": f"Bearer {token}"},
-        json=payload,
-        timeout=15,
-    )
-    # пробрасываем тело ошибки, чтобы показать причину в Mini App
-    if response.status_code >= 400:
-        try:
-            detail = response.json()
-        except Exception:
-            detail = {"error": response.text[:200]}
-        raise HTTPException(status_code=response.status_code, detail=detail)
-    return response.json()
-
-
-def _profit_percent(trade: dict[str, Any]) -> float | None:
-    for key in ("profit_pct", "close_profit_pct", "profit_percent", "close_profit_percent"):
-        value = safe_float(trade.get(key))
-        if value is not None:
-            return value
-    for key in ("profit_ratio", "close_profit", "close_profit_ratio"):
-        value = safe_float(trade.get(key))
-        if value is not None:
-            return value * 100
+            parsed = datetime.fromisoformat(text)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
+        except ValueError:
+            return None
     return None
 
 
-def normalize_trade(trade: dict[str, Any]) -> dict[str, Any]:
-    pair = trade.get("pair") or trade.get("symbol") or "-"
-    is_short = bool(trade.get("is_short"))
-    profit_abs = safe_float(
-        trade.get("profit_abs")
-        if trade.get("profit_abs") is not None
-        else trade.get("close_profit_abs")
-        if trade.get("close_profit_abs") is not None
-        else trade.get("realized_profit")
+def human_minutes(start: Any, end: Any | None = None) -> int | None:
+    start_dt = parse_datetime(start)
+    if not start_dt:
+        return None
+    end_dt = parse_datetime(end) or datetime.now(timezone.utc)
+    return max(0, int((end_dt - start_dt).total_seconds() // 60))
+
+
+def read_bot_targets() -> list[BotTarget]:
+    targets: list[BotTarget] = []
+    for config_path in BOT_CONFIG_PATHS:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        api = config["api_server"]
+        strategy = config["strategy"]
+        label = strategy.replace("VolatilitySqueezeBreakoutAggressive", "Volatility")
+        label = label.replace("DonchianVolumeBurst5m", "Donchian")
+        label = label.replace("VWAPPullbackMomentumScalp", "VWAP")
+        port = int(api["listen_port"])
+        targets.append(
+            BotTarget(
+                bot_id=str(config["bot_name"]),
+                label=label,
+                config_path=config_path,
+                base_url=f"http://127.0.0.1:{port}/api/v1",
+                username=str(api["username"]),
+                password=str(api["password"]),
+                strategy=strategy,
+                port=port,
+            )
+        )
+    return targets
+
+
+def require_access(request: Request) -> None:
+    if not ACCESS_TOKEN:
+        return
+    supplied = request.headers.get("x-miniapp-token") or request.query_params.get("access")
+    if supplied != ACCESS_TOKEN:
+        raise HTTPException(status_code=403, detail="Mini App access token is missing or invalid.")
+
+
+def request_json(
+    url: str,
+    *,
+    auth: tuple[str, str] | None = None,
+    params: dict[str, Any] | None = None,
+    timeout: float = 5.0,
+) -> Any:
+    response = requests.get(url, auth=auth, params=params, timeout=timeout)
+    response.raise_for_status()
+    return response.json()
+
+
+def bot_get(bot: BotTarget, endpoint: str, params: dict[str, Any] | None = None) -> Any:
+    return request_json(
+        f"{bot.base_url}/{endpoint}",
+        auth=(bot.username, bot.password),
+        params=params,
+        timeout=4.0,
     )
+
+
+def cached(key: str, ttl: float, producer):
+    now = time.time()
+    cached_value = _cache.get(key)
+    if cached_value and now - cached_value[0] < ttl:
+        return cached_value[1]
+    value = producer()
+    _cache[key] = (now, value)
+    return value
+
+
+def init_db() -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(JOURNAL_DB) as conn:
+        conn.execute(
+            """
+            create table if not exists trades (
+                id integer primary key autoincrement,
+                bot_id text not null,
+                strategy text not null,
+                ft_trade_id text not null,
+                pair text,
+                side text,
+                entry_tag text,
+                open_date text,
+                open_rate real,
+                stake_amount real,
+                amount real,
+                leverage real,
+                status text not null,
+                strategy_snapshot_json text not null,
+                first_seen_at text not null,
+                last_seen_at text not null,
+                close_date text,
+                close_rate real,
+                profit_abs real,
+                profit_ratio real,
+                exit_reason text,
+                hold_minutes integer,
+                raw_open_json text,
+                raw_close_json text,
+                unique(bot_id, ft_trade_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            create table if not exists events (
+                id integer primary key autoincrement,
+                event_time text not null,
+                bot_id text not null,
+                strategy text not null,
+                ft_trade_id text not null,
+                event_type text not null,
+                payload_json text not null
+            )
+            """
+        )
+        conn.commit()
+
+
+def import_strategy_snapshot(strategy_name: str) -> dict[str, Any]:
+    cache_key = f"strategy_snapshot:{strategy_name}"
+
+    def load_snapshot():
+        if str(STRATEGY_DIR) not in sys.path:
+            sys.path.insert(0, str(STRATEGY_DIR))
+        for file_path in STRATEGY_DIR.glob("*.py"):
+            source = file_path.read_text(encoding="utf-8")
+            if f"class {strategy_name}(" not in source:
+                continue
+            spec = importlib.util.spec_from_file_location(file_path.stem, file_path)
+            if not spec or not spec.loader:
+                continue
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            klass = getattr(module, strategy_name)
+            if hasattr(klass, "parameter_snapshot"):
+                return klass.parameter_snapshot()
+            return {
+                "strategy": strategy_name,
+                "timeframe": getattr(klass, "timeframe", None),
+                "stoploss": getattr(klass, "stoploss", None),
+                "minimal_roi": getattr(klass, "minimal_roi", None),
+            }
+        return {"strategy": strategy_name}
+
+    return cached(cache_key, 15.0, load_snapshot)
+
+
+def normalize_trade(bot: BotTarget, raw: dict[str, Any]) -> dict[str, Any]:
+    trade_id = pick(raw, ["trade_id", "id"], "")
+    is_short = bool(pick(raw, ["is_short", "short"], False))
+    close_date = pick(raw, ["close_date", "close_date_utc"], None)
+    is_open = bool(pick(raw, ["is_open", "open"], close_date is None))
+    open_date = pick(raw, ["open_date", "open_date_utc"], None)
+    profit_ratio = safe_float(pick(raw, ["profit_ratio", "close_profit"], 0.0))
+    profit_abs = safe_float(pick(raw, ["profit_abs", "close_profit_abs", "realized_profit"], 0.0))
     return {
-        "id": trade.get("trade_id") or trade.get("id"),
-        "pair": pair,
-        "side": "SHORT" if is_short else "LONG",
-        "is_short": is_short,
-        "is_open": bool(trade.get("is_open", trade.get("close_date") is None)),
-        "stake_amount": round_opt(trade.get("stake_amount"), 4),
-        "amount": round_opt(trade.get("amount"), 8),
-        "open_rate": round_opt(trade.get("open_rate"), 8),
-        "current_rate": round_opt(trade.get("current_rate"), 8),
-        "close_rate": round_opt(trade.get("close_rate"), 8),
-        "profit_percent": round_opt(_profit_percent(trade), 4),
-        "profit_abs": round_opt(profit_abs, 4),
-        "leverage": round_opt(trade.get("leverage"), 2),
-        "open_date": trade.get("open_date") or trade.get("open_date_hum"),
-        "close_date": trade.get("close_date") or trade.get("close_date_hum"),
-        "duration": trade.get("trade_duration") or trade.get("duration"),
-        "exit_reason": trade.get("exit_reason") or trade.get("sell_reason"),
-        "entry_tag": trade.get("enter_tag") or trade.get("entry_tag"),
+        "bot_id": bot.bot_id,
+        "bot_label": bot.label,
+        "strategy": bot.strategy,
+        "trade_id": str(trade_id),
+        "pair": pick(raw, ["pair"], ""),
+        "side": "short" if is_short else "long",
+        "entry_tag": pick(raw, ["entry_tag", "buy_tag"], ""),
+        "open_date": open_date,
+        "open_rate": safe_float(pick(raw, ["open_rate", "open_price"], 0.0)),
+        "current_rate": safe_float(pick(raw, ["current_rate", "current_price"], 0.0)),
+        "close_date": close_date,
+        "close_rate": safe_float(pick(raw, ["close_rate", "close_price"], 0.0)),
+        "stake_amount": safe_float(pick(raw, ["stake_amount", "stake_amount_fiat"], 0.0)),
+        "amount": safe_float(pick(raw, ["amount"], 0.0)),
+        "leverage": safe_float(pick(raw, ["leverage"], 1.0), 1.0),
+        "profit_abs": profit_abs,
+        "profit_ratio": profit_ratio,
+        "profit_pct": profit_ratio * 100.0,
+        "exit_reason": pick(raw, ["exit_reason", "sell_reason"], ""),
+        "is_open": is_open,
+        "status": "open" if is_open else "closed",
+        "hold_minutes": human_minutes(open_date, close_date),
+        "raw": raw,
     }
 
 
-def _as_list(value: Any) -> list[Any]:
-    if isinstance(value, list):
-        return value
-    if isinstance(value, dict):
-        return list(value.get("trades", []))
-    return []
+def load_recent_journal(limit: int = 80) -> list[dict[str, Any]]:
+    init_db()
+    with sqlite3.connect(JOURNAL_DB) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            select *
+            from trades
+            order by coalesce(close_date, open_date, last_seen_at) desc
+            limit ?
+            """,
+            (limit,),
+        ).fetchall()
+    result = []
+    for row in rows:
+        item = dict(row)
+        item["strategy_snapshot"] = json.loads(item.pop("strategy_snapshot_json") or "{}")
+        item.pop("raw_open_json", None)
+        item.pop("raw_close_json", None)
+        result.append(item)
+    return result
 
 
-def fetch_miniapp(pair: str | None = None) -> dict[str, Any]:
-    selected_pair = pair if pair in configured_pairs() else configured_pairs()[0]
-    cache_key = f"miniapp:{selected_pair}"
+def upsert_journal_trade(bot: BotTarget, trade: dict[str, Any]) -> None:
+    if not trade["trade_id"]:
+        return
+    snapshot = import_strategy_snapshot(bot.strategy)
+    now = utc_now_iso()
+    raw_json = json.dumps(trade["raw"], ensure_ascii=False, default=str)
+    snapshot_json = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, default=str)
+    with sqlite3.connect(JOURNAL_DB) as conn:
+        existing = conn.execute(
+            "select id, status from trades where bot_id = ? and ft_trade_id = ?",
+            (bot.bot_id, trade["trade_id"]),
+        ).fetchone()
+        if not existing:
+            conn.execute(
+                """
+                insert into trades (
+                    bot_id, strategy, ft_trade_id, pair, side, entry_tag, open_date,
+                    open_rate, stake_amount, amount, leverage, status,
+                    strategy_snapshot_json, first_seen_at, last_seen_at, close_date,
+                    close_rate, profit_abs, profit_ratio, exit_reason, hold_minutes,
+                    raw_open_json, raw_close_json
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    bot.bot_id,
+                    bot.strategy,
+                    trade["trade_id"],
+                    trade["pair"],
+                    trade["side"],
+                    trade["entry_tag"],
+                    trade["open_date"],
+                    trade["open_rate"],
+                    trade["stake_amount"],
+                    trade["amount"],
+                    trade["leverage"],
+                    trade["status"],
+                    snapshot_json,
+                    now,
+                    now,
+                    trade["close_date"],
+                    trade["close_rate"],
+                    trade["profit_abs"],
+                    trade["profit_ratio"],
+                    trade["exit_reason"],
+                    trade["hold_minutes"],
+                    raw_json,
+                    raw_json if trade["status"] == "closed" else None,
+                ),
+            )
+            conn.execute(
+                "insert into events (event_time, bot_id, strategy, ft_trade_id, event_type, payload_json) values (?, ?, ?, ?, ?, ?)",
+                (now, bot.bot_id, bot.strategy, trade["trade_id"], "opened", raw_json),
+            )
+        else:
+            previous_status = existing[1]
+            conn.execute(
+                """
+                update trades set
+                    status = ?,
+                    last_seen_at = ?,
+                    close_date = coalesce(?, close_date),
+                    close_rate = case when ? > 0 then ? else close_rate end,
+                    profit_abs = ?,
+                    profit_ratio = ?,
+                    exit_reason = coalesce(nullif(?, ''), exit_reason),
+                    hold_minutes = ?,
+                    raw_close_json = case when ? = 'closed' then ? else raw_close_json end
+                where bot_id = ? and ft_trade_id = ?
+                """,
+                (
+                    trade["status"],
+                    now,
+                    trade["close_date"],
+                    trade["close_rate"],
+                    trade["close_rate"],
+                    trade["profit_abs"],
+                    trade["profit_ratio"],
+                    trade["exit_reason"],
+                    trade["hold_minutes"],
+                    trade["status"],
+                    raw_json,
+                    bot.bot_id,
+                    trade["trade_id"],
+                ),
+            )
+            if previous_status != "closed" and trade["status"] == "closed":
+                conn.execute(
+                    "insert into events (event_time, bot_id, strategy, ft_trade_id, event_type, payload_json) values (?, ?, ?, ?, ?, ?)",
+                    (now, bot.bot_id, bot.strategy, trade["trade_id"], "closed", raw_json),
+                )
+        conn.commit()
 
-    def loader():
-        context = market_context()
-        bot = fetch_bot_state()
-        errors: list[str] = []
 
-        status: Any = []
-        trades_response: Any = {"trades": []}
-        profit: dict[str, Any] = {}
-        count: dict[str, Any] = {}
-        balance: dict[str, Any] = {}
-        show_config: dict[str, Any] = {}
-        performance: Any = []
+def fetch_bot(bot: BotTarget) -> dict[str, Any]:
+    status = "offline"
+    error = None
+    show_config: dict[str, Any] = {}
+    profit: dict[str, Any] = {}
+    balance: dict[str, Any] = {}
+    trades_payload: Any = {}
+    open_payload: Any = []
+    try:
+        show_config = bot_get(bot, "show_config")
+        profit = bot_get(bot, "profit")
+        balance = bot_get(bot, "balance")
+        open_payload = bot_get(bot, "status")
+        trades_payload = bot_get(bot, "trades", params={"limit": 500, "order_by_id": False})
+        status = "online"
+    except Exception as exc:
+        error = str(exc)
 
-        for name, path, params in (
-            ("status", "status", None),
-            ("trades", "trades", {"limit": 20, "offset": 0}),
-            ("profit", "profit", None),
-            ("count", "count", None),
-            ("balance", "balance", None),
-            ("show_config", "show_config", None),
-            ("performance", "performance", None),
-        ):
-            try:
-                value = freqtrade_api_get(path, params)
-                if name == "status":
-                    status = value
-                elif name == "trades":
-                    trades_response = value
-                elif name == "profit":
-                    profit = value
-                elif name == "count":
-                    count = value
-                elif name == "balance":
-                    balance = value
-                elif name == "show_config":
-                    show_config = value
-                elif name == "performance":
-                    performance = value
-            except Exception as exc:
-                errors.append(f"{name}: {str(exc)[:120]}")
+    raw_trades = []
+    if isinstance(trades_payload, dict):
+        raw_trades = trades_payload.get("trades") or trades_payload.get("data") or []
+    elif isinstance(trades_payload, list):
+        raw_trades = trades_payload
+    raw_open = open_payload if isinstance(open_payload, list) else []
 
-        market: dict[str, Any] | None = None
-        try:
-            full_market = fetch_market(selected_pair)
-            market = {
-                "pair": selected_pair,
-                "last": full_market.get("ticker", {}).get("last"),
-                "change24h": full_market.get("ticker", {}).get("percentage"),
-                "rsi": full_market.get("rsi"),
-                "funding": full_market.get("funding"),
-                "fear_greed": full_market.get("fear_greed"),
-                "chart": full_market.get("chart", [])[-48:],
-            }
-        except Exception as exc:
-            errors.append(f"market: {str(exc)[:120]}")
+    trades = [normalize_trade(bot, trade) for trade in raw_trades if isinstance(trade, dict)]
+    open_trades = [normalize_trade(bot, trade) for trade in raw_open if isinstance(trade, dict)]
+    if not open_trades:
+        open_trades = [trade for trade in trades if trade["is_open"]]
 
-        open_trades = [normalize_trade(item) for item in _as_list(status)]
-        recent_trades = [normalize_trade(item) for item in _as_list(trades_response)]
-        closed_trades = [item for item in recent_trades if not item["is_open"]]
-        currencies = balance.get("currencies", []) if isinstance(balance, dict) else []
-        stake_row = next((item for item in currencies if item.get("currency") == context.get("stake_currency")), None)
-        if stake_row is None and currencies:
-            stake_row = currencies[0]
+    for trade in trades[-100:] + open_trades:
+        upsert_journal_trade(bot, trade)
 
+    trade_count = safe_int(pick(profit, ["trade_count", "closed_trade_count"], len(trades)))
+    winning = safe_int(pick(profit, ["winning_trades", "wins"], 0))
+    losing = safe_int(pick(profit, ["losing_trades", "losses"], 0))
+    win_rate = (winning / trade_count * 100.0) if trade_count else 0.0
+    profit_abs = safe_float(pick(profit, ["profit_all_coin", "profit_closed_coin", "profit_all"], 0.0))
+    profit_pct = safe_float(pick(profit, ["profit_all_percent", "profit_closed_percent"], 0.0))
+    balance_total = safe_float(
+        pick(balance, ["total", "total_bot", "starting_capital"], 0.0),
+        default=0.0,
+    )
+    if balance_total <= 0:
+        balance_total = 100.0 + profit_abs
+
+    bot_state = str(pick(show_config, ["state"], "unknown"))
+    if status == "online" and bot_state.lower() != "running":
+        status = "paused"
+
+    return {
+        "id": bot.bot_id,
+        "label": bot.label,
+        "strategy": bot.strategy,
+        "port": bot.port,
+        "status": status,
+        "state": bot_state,
+        "error": error,
+        "dry_run": bool(pick(show_config, ["dry_run"], True)),
+        "trading_mode": pick(show_config, ["trading_mode"], "futures"),
+        "margin_mode": pick(show_config, ["margin_mode"], "isolated"),
+        "timeframe": pick(show_config, ["timeframe"], "5m"),
+        "balance": balance_total,
+        "profit_abs": profit_abs,
+        "profit_pct": profit_pct,
+        "open_trades": open_trades,
+        "open_count": len(open_trades),
+        "trade_count": trade_count,
+        "win_rate": win_rate,
+        "max_drawdown": safe_float(pick(profit, ["max_drawdown", "max_drawdown_abs"], 0.0)),
+        "snapshot": import_strategy_snapshot(bot.strategy),
+    }
+
+
+def symbol_from_pair(pair: str) -> str:
+    return MARKET_SYMBOLS.get(pair, "BTCUSDT")
+
+
+def fetch_orderbook(symbol: str) -> dict[str, Any]:
+    def produce():
+        payload = request_json(
+            "https://fapi.binance.com/fapi/v1/depth",
+            params={"symbol": symbol, "limit": 10},
+            timeout=5.0,
+        )
+        bids = [[safe_float(price), safe_float(size)] for price, size in payload.get("bids", [])[:10]]
+        asks = [[safe_float(price), safe_float(size)] for price, size in payload.get("asks", [])[:10]]
+        max_size = max([size for _, size in bids + asks] or [1.0])
         return {
-            "context": {
-                **context,
-                "bot_name": show_config.get("bot_name"),
-                "strategy": show_config.get("strategy"),
-                "short_allowed": show_config.get("short_allowed"),
-                "max_open_trades": show_config.get("max_open_trades"),
-            },
-            "summary": {
-                "available": bot.get("available", False),
-                "dry_run": context.get("dry_run"),
-                "open_trades": count.get("current", bot.get("open_trades", len(open_trades))),
-                "max_open_trades": count.get("max", bot.get("max_open_trades")),
-                "total_stake": count.get("total_stake", 0),
-                "trade_count": profit.get("trade_count", 0),
-                "closed_trade_count": profit.get("closed_trade_count", 0),
-                "profit_all_percent": profit.get("profit_all_percent", 0),
-                "profit_all_coin": profit.get("profit_all_coin", 0),
-                "profit_closed_coin": profit.get("profit_closed_coin", 0),
-                "winrate": profit.get("winrate", 0),
-                "balance_total": balance.get("total"),
-                "balance_value": balance.get("value"),
-                "stake_free": None if stake_row is None else stake_row.get("free"),
-            },
-            "open_trades": open_trades,
-            "recent_trades": closed_trades[:12],
-            "performance": _as_list(performance)[:8],
-            "pairs": configured_pairs(),
-            "market": market,
-            "errors": errors,
-            "updated_at": int(_now() * 1000),
+            "symbol": symbol,
+            "bids": [{"price": price, "size": size, "depth": size / max_size} for price, size in bids],
+            "asks": [{"price": price, "size": size, "depth": size / max_size} for price, size in asks],
         }
 
-    return _cached(cache_key, MINIAPP_TTL, loader)
+    try:
+        return cached(f"orderbook:{symbol}", 8.0, produce)
+    except Exception as exc:
+        return {"symbol": symbol, "bids": [], "asks": [], "error": str(exc)}
 
 
-def require_miniapp_access(request: Request) -> None:
-    # Просмотр: если токен на сервере НЕ задан — доступ открыт (read-only данные).
-    if not MINIAPP_ACCESS_TOKEN:
-        return
-    supplied = request.headers.get("x-miniapp-token") or request.query_params.get("access")
-    if supplied != MINIAPP_ACCESS_TOKEN:
-        raise HTTPException(status_code=401, detail="Miniapp access token required")
+def compute_rsi(closes: list[float], period: int = 14) -> float | None:
+    if len(closes) <= period + 1:
+        return None
+    gains = []
+    losses = []
+    for left, right in zip(closes[:-1], closes[1:]):
+        delta = right - left
+        gains.append(max(delta, 0.0))
+        losses.append(max(-delta, 0.0))
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    for gain, loss in zip(gains[period:], losses[period:]):
+        avg_gain = (avg_gain * (period - 1) + gain) / period
+        avg_loss = (avg_loss * (period - 1) + loss) / period
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return 100.0 - (100.0 / (1.0 + rs))
 
 
-def require_control_access(request: Request) -> None:
-    """
-    Управление (открыть/закрыть сделку) — строже просмотра:
-    - если MINIAPP_ACCESS_TOKEN на сервере НЕ задан, управление ЗАПРЕЩЕНО полностью
-      (защита по умолчанию: лучше не дать управлять, чем открыть всем);
-    - если задан — требуем точное совпадение токена.
-    """
-    if not MINIAPP_ACCESS_TOKEN:
-        raise HTTPException(
-            status_code=403,
-            detail="Управление отключено: на сервере не задан MINIAPP_ACCESS_TOKEN",
-        )
-    supplied = request.headers.get("x-miniapp-token") or request.query_params.get("access")
-    if supplied != MINIAPP_ACCESS_TOKEN:
-        raise HTTPException(status_code=401, detail="Нужен корректный токен доступа")
+def fetch_rsi(symbols: list[str]) -> dict[str, Any]:
+    def produce():
+        values: dict[str, Any] = {}
+        for symbol in symbols:
+            payload = request_json(
+                "https://fapi.binance.com/fapi/v1/klines",
+                params={"symbol": symbol, "interval": "1h", "limit": 100},
+                timeout=6.0,
+            )
+            closes = [safe_float(row[4]) for row in payload]
+            rsi = compute_rsi(closes)
+            values[symbol] = None if rsi is None else round(rsi, 1)
+        return values
+
+    try:
+        return cached("rsi:1h", 90.0, produce)
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+def fetch_funding(symbols: list[str]) -> dict[str, Any]:
+    def produce():
+        values: dict[str, Any] = {}
+        for symbol in symbols:
+            payload = request_json(
+                "https://fapi.binance.com/fapi/v1/premiumIndex",
+                params={"symbol": symbol},
+                timeout=5.0,
+            )
+            values[symbol] = {
+                "rate": safe_float(payload.get("lastFundingRate")) * 100.0,
+                "mark_price": safe_float(payload.get("markPrice")),
+                "next_time": payload.get("nextFundingTime"),
+            }
+        return values
+
+    try:
+        return cached("funding", 45.0, produce)
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+def fetch_fear_greed() -> dict[str, Any]:
+    def produce():
+        payload = request_json("https://api.alternative.me/fng/", params={"limit": 2}, timeout=6.0)
+        data = payload.get("data", [])
+        current = data[0] if data else {}
+        previous = data[1] if len(data) > 1 else {}
+        return {
+            "value": safe_int(current.get("value"), 0),
+            "label": current.get("value_classification") or "Unknown",
+            "yesterday": safe_int(previous.get("value"), 0) if previous else None,
+        }
+
+    try:
+        return cached("fear_greed", 600.0, produce)
+    except Exception as exc:
+        return {"value": None, "label": "Unavailable", "yesterday": None, "error": str(exc)}
 
 
 def fetch_market(pair: str) -> dict[str, Any]:
-    if pair not in configured_pairs():
-        raise ValueError(f"Pair {pair} is not in config whitelist")
-
-    def loader():
-        context = market_context()
-        timeframe = context["timeframe"]
-        market_exchange = exchange_client("market")
-        ticker = market_exchange.fetch_ticker(pair)
-        orderbook = market_exchange.fetch_order_book(pair, limit=20)
-        candles = market_exchange.fetch_ohlcv(pair, timeframe=timeframe, limit=160)
-        closes = [float(candle[4]) for candle in candles]
-        rsi_values = calc_rsi(closes)
-        chart = [
-            {
-                "time": int(candle[0]),
-                "open": float(candle[1]),
-                "high": float(candle[2]),
-                "low": float(candle[3]),
-                "close": float(candle[4]),
-                "volume": float(candle[5]),
-                "rsi": None if rsi_values[index] is None else round(float(rsi_values[index]), 2),
-            }
-            for index, candle in enumerate(candles)
-        ]
-
-        bids = normalize_orderbook(orderbook.get("bids", []), 10)
-        asks = normalize_orderbook(orderbook.get("asks", []), 10)
-        best_bid = bids[0]["price"] if bids else None
-        best_ask = asks[0]["price"] if asks else None
-        spread = None
-        if best_bid and best_ask:
-            spread = best_ask - best_bid
-
-        return {
-            "pair": pair,
-            "context": context,
-            "ticker": {
-                "last": round_opt(ticker.get("last")),
-                "bid": round_opt(ticker.get("bid") if ticker.get("bid") is not None else best_bid),
-                "ask": round_opt(ticker.get("ask") if ticker.get("ask") is not None else best_ask),
-                "percentage": round_opt(ticker.get("percentage"), 3),
-                "quoteVolume": round_opt(ticker.get("quoteVolume"), 2),
-                "high": round_opt(ticker.get("high")),
-                "low": round_opt(ticker.get("low")),
-                "timestamp": ticker.get("timestamp"),
-            },
-            "orderbook": {
-                "bids": bids,
-                "asks": asks,
-                "spread": round_opt(spread, 8),
-            },
-            "chart": chart,
-            "rsi": chart[-1]["rsi"] if chart else None,
-            "funding": fetch_funding(pair),
-            "fear_greed": fetch_fear_greed(),
-            "bot": fetch_bot_state(),
-            "updated_at": int(_now() * 1000),
-        }
-
-    return _cached(f"market:{pair}", MARKET_TTL, loader)
-
-
-@app.get("/")
-def index():
-    return FileResponse(STATIC_DIR / "index.html")
-
-
-@app.get("/miniapp")
-def miniapp():
-    return FileResponse(STATIC_DIR / "miniapp.html")
-
-
-@app.get("/api/pairs")
-def api_pairs():
+    symbol = symbol_from_pair(pair)
+    symbols = [symbol_from_pair(pair_name) for pair_name in PAIRS]
     return {
-        "pairs": configured_pairs(),
-        "context": market_context(),
-        "bot": fetch_bot_state(),
+        "pair": pair,
+        "symbol": symbol,
+        "orderbook": fetch_orderbook(symbol),
+        "rsi": fetch_rsi(symbols),
+        "funding": fetch_funding(symbols),
         "fear_greed": fetch_fear_greed(),
     }
 
 
-@app.get("/api/market")
-def api_market(pair: str = Query(...)):
-    try:
-        return fetch_market(pair)
-    except Exception as exc:
-        return {"pair": pair, "available": False, "error": str(exc)[:240], "bot": fetch_bot_state()}
+def build_payload(pair: str | None = None) -> dict[str, Any]:
+    init_db()
+    selected_pair = pair if pair in PAIRS else PAIRS[0]
+    bots = [fetch_bot(bot) for bot in read_bot_targets()]
+    open_trades = []
+    for bot in bots:
+        for trade in bot["open_trades"]:
+            open_trades.append(trade)
+    total_balance = sum(safe_float(bot["balance"]) for bot in bots)
+    total_profit = sum(safe_float(bot["profit_abs"]) for bot in bots)
+    starting_balance = 100.0 * len(bots)
+    total_profit_pct = (total_profit / starting_balance * 100.0) if starting_balance else 0.0
+    dry_run_all = all(bool(bot["dry_run"]) for bot in bots)
+    return {
+        "generated_at": utc_now_iso(),
+        "access_enabled": bool(ACCESS_TOKEN),
+        "pairs": PAIRS,
+        "summary": {
+            "bots_total": len(bots),
+            "bots_online": len([bot for bot in bots if bot["status"] == "online"]),
+            "bots_running": len([bot for bot in bots if bot["state"] == "running"]),
+            "dry_run_all": dry_run_all,
+            "total_balance": total_balance,
+            "total_profit_abs": total_profit,
+            "total_profit_pct": total_profit_pct,
+            "open_trades": len(open_trades),
+            "starting_balance": starting_balance,
+        },
+        "bots": bots,
+        "open_trades": sorted(open_trades, key=lambda item: item.get("profit_pct", 0), reverse=True),
+        "journal": load_recent_journal(80),
+        "market": fetch_market(selected_pair),
+    }
+
+
+@app.get("/")
+def root(request: Request):
+    require_access(request)
+    return FileResponse(STATIC_DIR / "miniapp.html")
+
+
+@app.get("/miniapp")
+def miniapp(request: Request):
+    require_access(request)
+    return FileResponse(STATIC_DIR / "miniapp.html")
 
 
 @app.get("/api/miniapp")
 def api_miniapp(request: Request, pair: str | None = Query(default=None)):
-    require_miniapp_access(request)
-    try:
-        return fetch_miniapp(pair)
-    except Exception as exc:
-        return {
-            "available": False,
-            "error": str(exc)[:240],
-            "context": market_context(),
-            "summary": fetch_bot_state(),
-            "updated_at": int(_now() * 1000),
-        }
+    require_access(request)
+    return JSONResponse(build_payload(pair))
 
 
-# ---------------------------------------------------------------------------
-#  УПРАВЛЕНИЕ из Mini App: открыть/закрыть сделку (только dry-run).
-#  Проксируем в Freqtrade REST API. Защищено тем же miniapp-токеном.
-# ---------------------------------------------------------------------------
-@app.post("/api/control/forceenter")
-async def api_force_enter(request: Request):
-    # Сначала ЧИТАЕМ тело (иначе ответ до чтения body -> обрыв -> 502 на прокси),
-    # затем проверяем токен -> чистый 401 при отсутствии доступа.
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
-    require_control_access(request)
-    pair = body.get("pair")
-    side = body.get("side", "long")
-    if pair not in configured_pairs():
-        raise HTTPException(status_code=400, detail="Пара не в whitelist")
-    if side not in ("long", "short"):
-        raise HTTPException(status_code=400, detail="side должен быть long или short")
-    # market — чтобы вход исполнялся сразу (удобно для теста)
-    payload = {"pair": pair, "side": side, "ordertype": "market"}
-    result = freqtrade_api_post("forceenter", payload)
-    _cache.pop("bot_state", None)  # сбросить кэш статуса, чтобы UI сразу обновился
-    return {"ok": True, "result": result}
+@app.get("/api/journal")
+def api_journal(request: Request, limit: int = Query(default=80, ge=1, le=500)):
+    require_access(request)
+    return {"generated_at": utc_now_iso(), "trades": load_recent_journal(limit)}
 
 
-@app.post("/api/control/forceexit")
-async def api_force_exit(request: Request):
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
-    require_control_access(request)
-    tradeid = body.get("tradeid")
-    if tradeid in (None, ""):
-        raise HTTPException(status_code=400, detail="Нужен tradeid (или 'all')")
-    payload = {"tradeid": str(tradeid), "ordertype": "market"}
-    result = freqtrade_api_post("forceexit", payload)
-    _cache.pop("bot_state", None)
-    return {"ok": True, "result": result}
+@app.get("/api/health")
+def api_health(request: Request):
+    require_access(request)
+    checks = []
+    for bot in read_bot_targets():
+        try:
+            payload = bot_get(bot, "show_config")
+            checks.append(
+                {
+                    "bot_id": bot.bot_id,
+                    "strategy": bot.strategy,
+                    "port": bot.port,
+                    "ok": True,
+                    "state": payload.get("state"),
+                    "dry_run": payload.get("dry_run"),
+                }
+            )
+        except Exception as exc:
+            checks.append(
+                {
+                    "bot_id": bot.bot_id,
+                    "strategy": bot.strategy,
+                    "port": bot.port,
+                    "ok": False,
+                    "error": str(exc),
+                }
+            )
+    return {
+        "generated_at": utc_now_iso(),
+        "dashboard": "ok",
+        "journal_db": str(JOURNAL_DB),
+        "bots": checks,
+    }
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run("dashboard.server:app", host="127.0.0.1", port=8092, reload=False)

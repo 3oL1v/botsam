@@ -3,138 +3,154 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#ececee" />
-    <meta name="color-scheme" content="light" />
-    <title>Freqtrade Mini Monitor</title>
+    <meta name="color-scheme" content="dark" />
+    <title>Dry-Run Bot Control</title>
     <link rel="stylesheet" href="/static/miniapp.css" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
-    <main class="phone-shell">
-      <header class="app-header">
-        <div>
-          <span class="muted">Freqtrade</span>
-          <h1>Mini Monitor</h1>
+    <main class="app-shell">
+      <header class="topbar">
+        <button class="icon-button" type="button" aria-label="Меню">
+          <span></span><span></span><span></span>
+        </button>
+        <div class="brand">
+          <span class="dry-pill">DRY RUN</span>
+          <strong>Bot Control</strong>
         </div>
-        <div class="header-status">
-          <span class="status-dot" id="statusDot"></span>
-          <span id="runState">...</span>
-          <strong>DRY RUN</strong>
+        <div class="run-state" id="runState">
+          <span class="state-dot"></span>
+          <span>Проверка</span>
         </div>
       </header>
 
-      <section class="hero-card">
-        <div class="hero-top">
-          <div>
-            <span id="exchangeMode" class="muted">binance futures</span>
-            <strong id="strategyName">-</strong>
-          </div>
-          <button id="refreshBtn" type="button" aria-label="Refresh">↻</button>
+      <section class="portfolio-card">
+        <div class="card-head">
+          <span>Виртуальный портфель</span>
+          <span class="muted" id="updatedAt">--</span>
         </div>
-        <div class="profit-line">
-          <span id="profitValue">0.00 USDT</span>
-          <strong id="profitPercent">0.00%</strong>
-        </div>
-        <div class="hero-grid">
+        <div class="portfolio-main">
           <div>
-            <span>Баланс</span>
-            <strong id="balanceValue">-</strong>
+            <div class="balance" id="totalBalance">--</div>
+            <div class="pnl positive" id="totalPnl">--</div>
           </div>
+          <svg class="sparkline" viewBox="0 0 120 54" aria-hidden="true">
+            <path id="sparkPath" d="M2 34 C18 24 28 30 42 22 C58 12 68 18 80 14 C94 12 102 9 118 4" />
+          </svg>
+        </div>
+        <div class="portfolio-stats">
           <div>
             <span>Открыто</span>
-            <strong id="openCount">-</strong>
+            <strong id="openCount">0</strong>
           </div>
           <div>
-            <span>Win rate</span>
-            <strong id="winRate">-</strong>
+            <span>Ботов online</span>
+            <strong id="botsOnline">0/3</strong>
+          </div>
+          <div>
+            <span>Режим</span>
+            <strong id="dryState">Dry</strong>
           </div>
         </div>
       </section>
 
-      <nav class="tabs" aria-label="Sections">
-        <button class="tab active" type="button" data-tab="overview">Обзор</button>
-        <button class="tab" type="button" data-tab="open">Открытые</button>
-        <button class="tab" type="button" data-tab="history">История</button>
-        <button class="tab" type="button" data-tab="control">Управление</button>
-      </nav>
+      <nav class="strategy-strip" id="strategyStrip" aria-label="Стратегии"></nav>
 
-      <section class="view active" id="view-overview">
-        <article class="market-card">
-          <div class="section-head">
-            <div>
-              <span class="muted">Рынок</span>
-              <h2 id="marketPair">-</h2>
-            </div>
-            <div class="market-price">
-              <strong id="marketPrice">-</strong>
-              <span id="marketChange">-</span>
-            </div>
-          </div>
-          <canvas id="priceSpark" width="640" height="220"></canvas>
-        </article>
-
-        <section class="mini-metrics">
-          <article>
-            <span>RSI 14</span>
-            <strong id="rsiValue">-</strong>
-          </article>
-          <article>
-            <span>Fear & Greed</span>
-            <strong id="fearGreed">-</strong>
-          </article>
-          <article>
-            <span>Funding</span>
-            <strong id="fundingRate">-</strong>
-          </article>
-        </section>
-      </section>
-
-      <section class="view" id="view-open">
-        <div class="section-head compact">
+      <section class="panel" data-screen="overview">
+        <div class="section-title">
           <h2>Открытые сделки</h2>
-          <span id="openSubtitle" class="muted">-</span>
+          <span id="tradeSort">P/L %</span>
         </div>
-        <div id="openTrades" class="trade-list"></div>
+        <div class="trade-list" id="openTrades"></div>
       </section>
 
-      <section class="view" id="view-history">
-        <div class="section-head compact">
-          <h2>История</h2>
-          <span id="historySubtitle" class="muted">-</span>
+      <section class="panel" data-screen="overview">
+        <div class="section-title">
+          <h2>Рынок</h2>
+          <div class="pair-tabs" id="pairTabs"></div>
         </div>
-        <div id="recentTrades" class="trade-list"></div>
+        <div class="market-grid">
+          <article class="mini-card orderbook-card">
+            <div class="mini-head">
+              <span>Стакан</span>
+              <strong id="bookSymbol">BTCUSDT</strong>
+            </div>
+            <div class="book" id="orderbook"></div>
+          </article>
+          <article class="mini-card">
+            <div class="mini-head">
+              <span>Fear & Greed</span>
+              <strong id="fearLabel">--</strong>
+            </div>
+            <div class="gauge">
+              <div class="gauge-arc">
+                <span id="fearValue">--</span>
+              </div>
+              <small id="fearYesterday">Yesterday: --</small>
+            </div>
+          </article>
+        </div>
+        <div class="indicator-row">
+          <article class="mini-card">
+            <div class="mini-head">
+              <span>Funding 8h</span>
+              <strong>Binance</strong>
+            </div>
+            <div class="compact-list" id="fundingList"></div>
+          </article>
+          <article class="mini-card">
+            <div class="mini-head">
+              <span>RSI 1h</span>
+              <strong>14</strong>
+            </div>
+            <div class="compact-list" id="rsiList"></div>
+          </article>
+        </div>
       </section>
 
-      <section class="view" id="view-control">
-        <div class="section-head compact">
-          <h2>Тестовая сделка</h2>
-          <span class="muted">только dry-run</span>
+      <section class="panel hidden" data-screen="trades">
+        <div class="section-title">
+          <h2>Все стратегии</h2>
+          <span>dry-run</span>
         </div>
-
-        <article class="control-card">
-          <label class="control-label" for="pairSelect">Пара</label>
-          <select id="pairSelect" class="control-select"></select>
-
-          <div class="control-buttons">
-            <button id="btnLong" type="button" class="btn-trade long">▲ Лонг</button>
-            <button id="btnShort" type="button" class="btn-trade short">▼ Шорт</button>
-          </div>
-          <p class="control-hint">Вход по рынку, плечо 50x, нотионал 100 USDT.</p>
-          <div id="controlMsg" class="control-msg"></div>
-        </article>
-
-        <div class="section-head compact">
-          <h2>Закрыть сделку</h2>
-          <span id="controlOpenSub" class="muted">-</span>
-        </div>
-        <div id="controlOpenTrades" class="trade-list"></div>
+        <div class="bot-details" id="botDetails"></div>
       </section>
 
-      <footer class="app-footer">
-        <span id="updatedAt">-</span>
-        <span id="errorLine"></span>
-      </footer>
+      <section class="panel hidden" data-screen="journal">
+        <div class="section-title">
+          <h2>Память сделок</h2>
+          <span id="journalCount">0</span>
+        </div>
+        <div class="journal" id="journal"></div>
+      </section>
+
+      <section class="panel hidden" data-screen="settings">
+        <div class="section-title">
+          <h2>Система</h2>
+          <span>локально</span>
+        </div>
+        <div class="settings-list" id="healthList"></div>
+      </section>
     </main>
+
+    <nav class="bottom-nav" aria-label="Навигация">
+      <button class="nav-item active" data-target="overview" type="button" aria-label="Обзор">
+        <svg viewBox="0 0 24 24"><path d="M4 13a8 8 0 0 1 16 0" /><path d="M12 13l4-5" /><path d="M4 17h16" /></svg>
+        <span>Обзор</span>
+      </button>
+      <button class="nav-item" data-target="trades" type="button" aria-label="Стратегии">
+        <svg viewBox="0 0 24 24"><path d="M7 4v16" /><path d="M17 4v16" /><path d="M4 8h7" /><path d="M13 16h7" /></svg>
+        <span>Боты</span>
+      </button>
+      <button class="nav-item" data-target="journal" type="button" aria-label="Журнал">
+        <svg viewBox="0 0 24 24"><path d="M12 8v5l3 2" /><path d="M4 12a8 8 0 1 0 3-6" /><path d="M4 4v5h5" /></svg>
+        <span>Журнал</span>
+      </button>
+      <button class="nav-item" data-target="settings" type="button" aria-label="Система">
+        <svg viewBox="0 0 24 24"><path d="M12 3v3" /><path d="M12 18v3" /><path d="M4.2 6.2l2.1 2.1" /><path d="M17.7 17.7l2.1 2.1" /><path d="M3 12h3" /><path d="M18 12h3" /><circle cx="12" cy="12" r="4" /></svg>
+        <span>Система</span>
+      </button>
+    </nav>
 
     <script src="/static/miniapp.js"></script>
   </body>
