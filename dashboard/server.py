@@ -132,6 +132,11 @@ def human_minutes(start: Any, end: Any | None = None) -> int | None:
 
 def read_bot_targets() -> list[BotTarget]:
     targets: list[BotTarget] = []
+    url_env_by_strategy = {
+        "VolatilitySqueezeBreakoutAggressive": "BOT_VOLATILITY_URL",
+        "DonchianVolumeBurst5m": "BOT_DONCHIAN_URL",
+        "VWAPPullbackMomentumScalp": "BOT_VWAP_URL",
+    }
     for config_path in BOT_CONFIG_PATHS:
         config = json.loads(config_path.read_text(encoding="utf-8"))
         api = config["api_server"]
@@ -140,14 +145,21 @@ def read_bot_targets() -> list[BotTarget]:
         label = label.replace("DonchianVolumeBurst5m", "Donchian")
         label = label.replace("VWAPPullbackMomentumScalp", "VWAP")
         port = int(api["listen_port"])
+        env_url = os.environ.get(url_env_by_strategy.get(strategy, ""), "").strip()
+        if env_url:
+            base_url = env_url.rstrip("/")
+            if not base_url.endswith("/api/v1"):
+                base_url = f"{base_url}/api/v1"
+        else:
+            base_url = f"http://127.0.0.1:{port}/api/v1"
         targets.append(
             BotTarget(
                 bot_id=str(config["bot_name"]),
                 label=label,
                 config_path=config_path,
-                base_url=f"http://127.0.0.1:{port}/api/v1",
-                username=str(api["username"]),
-                password=str(api["password"]),
+                base_url=base_url,
+                username=os.environ.get("BOT_API_USERNAME", str(api["username"])),
+                password=os.environ.get("BOT_API_PASSWORD", str(api["password"])),
                 strategy=strategy,
                 port=port,
             )

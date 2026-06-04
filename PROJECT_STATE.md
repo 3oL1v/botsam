@@ -33,11 +33,21 @@ All active configs must keep `"dry_run": true`.
 ## Railway
 
 - Dockerfile uses `freqtradeorg/freqtrade:stable`.
-- `start.sh` starts 3 dry-run Freqtrade loops in background and dashboard in foreground.
-- Railway should expose only `$PORT` for the dashboard.
+- `start.sh` supports `SERVICE_ROLE=all|dashboard|volatility|donchian|vwap`.
+- Recommended production layout: 4 Railway services in one project.
+- Dashboard service should expose only `$PORT` publicly.
+- Bot services should set `PORT=8080` and do not need public domains.
 - Set `MINIAPP_ACCESS_TOKEN` in Railway Variables.
 - Binance may reject cloud IPs with HTTP 451. Check deploy logs and `/api/health`.
 - Token-protected log tails are available at `/api/logs?name=donchian&access=...`.
+
+Dashboard service variables for private networking:
+
+```text
+BOT_VOLATILITY_URL=http://volatility.railway.internal:8080/api/v1
+BOT_DONCHIAN_URL=http://donchian.railway.internal:8080/api/v1
+BOT_VWAP_URL=http://vwap.railway.internal:8080/api/v1
+```
 
 ## Commands
 

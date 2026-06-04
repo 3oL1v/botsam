@@ -1,12 +1,28 @@
 # Деплой на Railway
 
-Цель: один Railway service запускает 3 Freqtrade dry-run процесса и один Mini App dashboard. Наружу публикуется только dashboard. Freqtrade REST API слушает `127.0.0.1` внутри контейнера.
+Цель: Railway запускает 3 Freqtrade dry-run бота и один Mini App dashboard. Наружу публикуется только dashboard. Боты доступны dashboard через Railway private networking.
 
 ## Важно
 
 - Реальная торговля не включается: во всех конфигах `dry_run: true`.
 - Binance Futures может заблокировать Railway/cloud IP ошибкой `451 restricted location`. После деплоя нужно проверять deploy logs и `/api/health`.
 - Railway Quick/Generated Domain даст постоянный HTTPS URL для Telegram Mini App. Cloudflare quick tunnel на Railway не нужен.
+- Один Railway service с 3 Freqtrade процессами может флапать по памяти. Рекомендуемая схема: 4 services из одного repo.
+
+## Рекомендуемая схема: 4 Railway services
+
+Создай в одном Railway project четыре services из одного GitHub repo:
+
+| Service name | Variables |
+|---|---|
+| `dashboard` | `SERVICE_ROLE=dashboard`, `MINIAPP_ACCESS_TOKEN=...`, `BOT_VOLATILITY_URL=http://volatility.railway.internal:8080/api/v1`, `BOT_DONCHIAN_URL=http://donchian.railway.internal:8080/api/v1`, `BOT_VWAP_URL=http://vwap.railway.internal:8080/api/v1` |
+| `volatility` | `SERVICE_ROLE=volatility`, `PORT=8080` |
+| `donchian` | `SERVICE_ROLE=donchian`, `PORT=8080` |
+| `vwap` | `SERVICE_ROLE=vwap`, `PORT=8080` |
+
+Public domain генерируй только для `dashboard`. Для трёх bot services публичный домен не нужен.
+
+Railway private networking использует внутренние имена вида `service-name.railway.internal`; HTTP внутри private network должен быть обычный `http`, не `https`.
 
 ## Через Railway CLI
 
@@ -17,6 +33,8 @@ railway link
 railway variables set MINIAPP_ACCESS_TOKEN="длинный_секретный_токен"
 railway up
 ```
+
+CLI вариант выше подходит для одного service. Для рекомендуемой 4-service схемы проще создать/продублировать services в Railway UI и задать `SERVICE_ROLE`.
 
 После деплоя:
 
