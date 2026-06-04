@@ -1,0 +1,5 @@
+# Caddy reverse proxy with automatic HTTPS (Let's Encrypt) for the DuckDNS domain.
+# DOMAIN is injected from the .env file via docker-compose.
+{$DOMAIN} {
+	reverse_proxy bots:8092
+}

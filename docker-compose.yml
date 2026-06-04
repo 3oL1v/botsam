@@ -1,0 +1,42 @@
+# Oracle Cloud Always Free deployment.
+# - `bots`: the existing Dockerfile (SERVICE_ROLE=all) -> 3 dry-run Freqtrade
+#   bots + Mini App dashboard in one container, dashboard on :8092 (internal).
+# - `caddy`: public HTTPS on 80/443, auto Let's Encrypt cert for $DOMAIN,
+#   reverse-proxies to the dashboard. Only Caddy is exposed to the internet.
+#
+# Set MINIAPP_ACCESS_TOKEN and DOMAIN in a .env file next to this file:
+#   MINIAPP_ACCESS_TOKEN=ваш_токен
+#   DOMAIN=yourname.duckdns.org
+#
+# Then:  docker compose up -d --build
+services:
+  bots:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      SERVICE_ROLE: all
+      PORT: "8092"
+      MINIAPP_ACCESS_TOKEN: ${MINIAPP_ACCESS_TOKEN}
+    expose:
+      - "8092"
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    depends_on:
+      - bots
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:
