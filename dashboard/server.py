@@ -155,6 +155,57 @@ def read_bot_targets() -> list[BotTarget]:
     return targets
 
 
+def secret_values() -> list[str]:
+    values = [ACCESS_TOKEN]
+    for config_path in BOT_CONFIG_PATHS:
+        try:
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        api = config.get("api_server", {})
+        exchange = config.get("exchange", {})
+        for key in ("password", "jwt_secret_key", "ws_token"):
+            value = api.get(key)
+            if value:
+                values.append(str(value))
+        for key in ("key", "secret"):
+            value = exchange.get(key)
+            if value:
+                values.append(str(value))
+    return [value for value in values if value]
+
+
+def sanitize_log_text(text: str) -> str:
+    sanitized = text
+    for value in secret_values():
+        sanitized = sanitized.replace(value, "***")
+    return sanitized
+
+
+def read_log_tail(name: str, lines: int = 80) -> dict[str, Any]:
+    allowed = {
+        "volatility": ROOT / "logs" / "volatility.log",
+        "donchian": ROOT / "logs" / "donchian.log",
+        "vwap": ROOT / "logs" / "vwap.log",
+        "dashboard_out": ROOT / "logs" / "dashboard.out.log",
+        "dashboard_err": ROOT / "logs" / "dashboard.err.log",
+    }
+    if name not in allowed:
+        raise HTTPException(status_code=400, detail="Unknown log name.")
+    path = allowed[name]
+    if not path.exists():
+        return {"name": name, "path": str(path), "exists": False, "lines": []}
+    raw_lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    tail = raw_lines[-max(1, min(lines, 500)) :]
+    return {
+        "name": name,
+        "path": str(path),
+        "exists": True,
+        "line_count": len(raw_lines),
+        "lines": sanitize_log_text("\n".join(tail)).splitlines(),
+    }
+
+
 def require_access(request: Request) -> None:
     if not ACCESS_TOKEN:
         return
@@ -709,6 +760,24 @@ def api_health(request: Request):
         "journal_db": str(JOURNAL_DB),
         "bots": checks,
     }
+
+
+@app.get("/api/logs")
+def api_logs(
+    request: Request,
+    name: str = Query(default="donchian"),
+    lines: int = Query(default=80, ge=1, le=500),
+):
+    require_access(request)
+    if name == "all":
+        return {
+            "generated_at": utc_now_iso(),
+            "logs": {
+                item: read_log_tail(item, lines)
+                for item in ("volatility", "donchian", "vwap", "dashboard_out", "dashboard_err")
+            },
+        }
+    return {"generated_at": utc_now_iso(), "log": read_log_tail(name, lines)}
 
 
 if __name__ == "__main__":

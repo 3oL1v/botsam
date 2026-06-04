@@ -63,6 +63,7 @@ Dashboard API:
 Invoke-WebRequest "http://127.0.0.1:8092/api/health?access=TOKEN_ИЗ_ENV"
 Invoke-WebRequest "http://127.0.0.1:8092/api/miniapp?access=TOKEN_ИЗ_ENV"
 Invoke-WebRequest "http://127.0.0.1:8092/api/journal?access=TOKEN_ИЗ_ENV"
+Invoke-WebRequest "http://127.0.0.1:8092/api/logs?name=donchian&access=TOKEN_ИЗ_ENV"
 ```
 
 ## Память сделок

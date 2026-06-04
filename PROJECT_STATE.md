@@ -37,6 +37,7 @@ All active configs must keep `"dry_run": true`.
 - Railway should expose only `$PORT` for the dashboard.
 - Set `MINIAPP_ACCESS_TOKEN` in Railway Variables.
 - Binance may reject cloud IPs with HTTP 451. Check deploy logs and `/api/health`.
+- Token-protected log tails are available at `/api/logs?name=donchian&access=...`.
 
 ## Commands
 

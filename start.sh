@@ -12,6 +12,7 @@ start_bot_loop() {
   local logfile="$3"
 
   (
+    set +e
     while true; do
       echo "[${name}] starting Freqtrade dry-run bot with ${config}"
       freqtrade trade \

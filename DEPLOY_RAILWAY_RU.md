@@ -39,6 +39,12 @@ Health URL:
 https://ТВОЙ-ДОМЕН.up.railway.app/api/health?access=ТВОЙ_ТОКЕН
 ```
 
+Log tail URL:
+
+```text
+https://ТВОЙ-ДОМЕН.up.railway.app/api/logs?name=donchian&lines=120&access=ТВОЙ_ТОКЕН
+```
+
 ## Через GitHub
 
 1. Закоммить и запушь изменения в `main`.
