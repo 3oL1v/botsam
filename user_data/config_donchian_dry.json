@@ -40,7 +40,7 @@
     "exit": "GTC"
   },
   "exchange": {
-    "name": "binance",
+    "name": "bybit",
     "key": "",
     "secret": "",
     "ccxt_config": {

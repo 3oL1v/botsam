@@ -568,12 +568,13 @@ def symbol_from_pair(pair: str) -> str:
 def fetch_orderbook(symbol: str) -> dict[str, Any]:
     def produce():
         payload = request_json(
-            "https://fapi.binance.com/fapi/v1/depth",
-            params={"symbol": symbol, "limit": 10},
+            "https://api.bybit.com/v5/market/orderbook",
+            params={"category": "linear", "symbol": symbol, "limit": 25},
             timeout=5.0,
         )
-        bids = [[safe_float(price), safe_float(size)] for price, size in payload.get("bids", [])[:10]]
-        asks = [[safe_float(price), safe_float(size)] for price, size in payload.get("asks", [])[:10]]
+        result = payload.get("result", {})
+        bids = [[safe_float(price), safe_float(size)] for price, size in result.get("b", [])[:10]]
+        asks = [[safe_float(price), safe_float(size)] for price, size in result.get("a", [])[:10]]
         max_size = max([size for _, size in bids + asks] or [1.0])
         return {
             "symbol": symbol,
@@ -612,11 +613,13 @@ def fetch_rsi(symbols: list[str]) -> dict[str, Any]:
         values: dict[str, Any] = {}
         for symbol in symbols:
             payload = request_json(
-                "https://fapi.binance.com/fapi/v1/klines",
-                params={"symbol": symbol, "interval": "1h", "limit": 100},
+                "https://api.bybit.com/v5/market/kline",
+                params={"category": "linear", "symbol": symbol, "interval": "60", "limit": 100},
                 timeout=6.0,
             )
-            closes = [safe_float(row[4]) for row in payload]
+            rows = payload.get("result", {}).get("list", [])
+            # Bybit returns candles newest-first; reverse to chronological for RSI.
+            closes = [safe_float(row[4]) for row in reversed(rows)]
             rsi = compute_rsi(closes)
             values[symbol] = None if rsi is None else round(rsi, 1)
         return values
@@ -632,14 +635,16 @@ def fetch_funding(symbols: list[str]) -> dict[str, Any]:
         values: dict[str, Any] = {}
         for symbol in symbols:
             payload = request_json(
-                "https://fapi.binance.com/fapi/v1/premiumIndex",
-                params={"symbol": symbol},
+                "https://api.bybit.com/v5/market/tickers",
+                params={"category": "linear", "symbol": symbol},
                 timeout=5.0,
             )
+            rows = payload.get("result", {}).get("list", [])
+            row = rows[0] if rows else {}
             values[symbol] = {
-                "rate": safe_float(payload.get("lastFundingRate")) * 100.0,
-                "mark_price": safe_float(payload.get("markPrice")),
-                "next_time": payload.get("nextFundingTime"),
+                "rate": safe_float(row.get("fundingRate")) * 100.0,
+                "mark_price": safe_float(row.get("markPrice")),
+                "next_time": safe_int(row.get("nextFundingTime"), 0) or None,
             }
         return values
 
